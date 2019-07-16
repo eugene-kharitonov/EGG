@@ -218,6 +218,8 @@ def dump_sender_receiver(game: torch.nn.Module,
 
             if not variable_length:
                 messages.extend(message)
+                if isinstance(output, (tuple, list)):
+                    output = output[0]
                 receiver_outputs.extend(output)
             else:
                 # A trickier part is to handle EOS in the messages. It also might happen that not every message has EOS.

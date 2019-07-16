@@ -29,7 +29,8 @@ class SequenceData:
 
     def __getitem__(self, i):
         i = i % len(self.sequences)
-        return self.sequences[i], self.sequences[i]
+        # sender input, labels, receiver input
+        return self.sequences[i], torch.zeros(1), self.sequences[i]
 
 
     def __len__(self):

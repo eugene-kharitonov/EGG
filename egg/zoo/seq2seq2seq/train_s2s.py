@@ -27,26 +27,37 @@ def get_params():
                         help='Max len for the dataset')
     parser.add_argument('--no_teacher_forcing', action='store_true', default=False,
                         help='Disable teacher forcing during training')
+    parser.add_argument('--dataset_scaler', type=int, default=10)
     args = core.init(parser)
 
     return args
 
 
-def loss(sender_input, _message, _receiver_input, receiver_output, _labels):
-    acc = (receiver_output == sender_input).float().mean(dim=1)
+def accuracy_loss(sender_input, _message, _receiver_input, receiver_output, _labels):
+    output_sequence, _output_logprobs = receiver_output
+    acc = (output_sequence == sender_input).float().mean(dim=1)
     return -acc, {'acc': acc}
 
 
-def loss_teacher_forcing(sender_input, _message, _receiver_input, receiver_output, _labels):
-    acc = (receiver_output == sender_input).float().mean(dim=1)
-    return -acc, {'acc': acc}
+def nll_teacher_forcing_loss(sender_input, _message, _receiver_input, receiver_output, _labels):
+    output_sequence, output_logprobs = receiver_output
+    # TODO: find eos
+    loss = 0.0
+    assert sender_input.size(1) == output_logprobs.size(1)
+
+    for step in range(sender_input.size(1)):
+        nll = F.nll_loss(output_logprobs[:, step, :], sender_input[:, step])
+        loss += nll
+
+    acc = (output_sequence == sender_input).float().mean(dim=1)
+    return loss, {'acc': acc}
 
 if __name__ == "__main__":
     opts = get_params()
 
     device = torch.device("cuda" if opts.cuda else "cpu")
 
-    train_dataset = SequenceData(max_len=opts.data_max_len, vocab_size=opts.data_vocab_size)
+    train_dataset = SequenceData(max_len=opts.data_max_len, vocab_size=opts.data_vocab_size, scale_factor=opts.dataset_scaler)
     train_loader = data.DataLoader(train_dataset, batch_size=opts.batch_size, shuffle=True)
     validation_dataset = SequenceData(max_len=opts.data_max_len, vocab_size=opts.data_vocab_size, scale_factor=1)
     validation_loader = data.DataLoader(validation_dataset, batch_size=opts.batch_size, shuffle=False)
@@ -56,6 +67,12 @@ if __name__ == "__main__":
                      teacher_forcing=not opts.no_teacher_forcing)
 
     sender = CopySender()
+
+    if opts.no_teacher_forcing:
+        loss = accuracy_loss
+    else:
+        loss = nll_teacher_forcing_loss
+
     game = core.SenderReceiverRnnReinforce(sender, receiver, loss, sender_entropy_coeff=0.0, receiver_entropy_coeff=0.05)
     optimizer = core.build_optimizer(game.parameters())
 
@@ -64,10 +81,16 @@ if __name__ == "__main__":
     trainer.train(n_epochs=opts.n_epochs)
 
     sender_inputs, messages, _, receiver_outputs, labels = \
-        core.dump_sender_receiver(game, validation_loader, gs=False, device=device, variable_length=True)
+        core.dump_sender_receiver(game, validation_loader, gs=False, device=device, variable_length=False)#True)
 
-    for seq, message, output, label in zip(sender_inputs, messages, receiver_outputs, labels):
+    for seq, message, output in zip(sender_inputs, messages, receiver_outputs):
         print(f'{seq} -> {message} -> {output}')
 
     core.close()
 
+# TODO:
+# * eos in inputs/outputs
+# * joint training
+# * separate encoder class from the Receiver everywhere
+# * have Transformer encoder
+# * dataset-based input

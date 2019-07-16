@@ -61,7 +61,6 @@ class Decoder(nn.Module):
             cell_type(input_size=n_hidden, hidden_size=n_hidden) for i in range(self.num_layers)])
 
     def forward(self, encoder_state, ground_truth=None):
-        print('GT', ground_truth)
         batch_size = encoder_state.size(0)
 
         prev_hidden = [encoder_state] # TODO: attention mechanism
@@ -74,9 +73,9 @@ class Decoder(nn.Module):
         sequence = []
         logits = []
         entropy = []
+        symbol_logprobs = []
 
         if not self.teacher_forcing or not self.training:
-            assert ground_truth is not None
             # teacher forcing is disabled, doing reinforce instead
             for step in range(self.max_len):
                 for i, layer in enumerate(self.cells):
@@ -97,15 +96,12 @@ class Decoder(nn.Module):
                 else:
                     x = step_logits.argmax(dim=1)
                 logits.append(distr.log_prob(x))
+                sequence.append(x)
+                symbol_logprobs.append(step_logits)
 
                 input = self.embedding(x)
-                sequence.append(x)
-
-            sequence = torch.stack(sequence).permute(1, 0)
-            logits = torch.stack(logits).permute(1, 0)
-            entropy = torch.stack(entropy).permute(1, 0)
-
         else:
+            assert ground_truth is not None
             actual_length = ground_truth.size(1)
             loss = 0.0
             for step in range(actual_length):
@@ -119,21 +115,22 @@ class Decoder(nn.Module):
                     input = h_t
 
                 step_logits = F.log_softmax(self.hidden_to_output(h_t), dim=1)
-                # TODO: <eos>
-                loss += F.nll_loss(step_logits, ground_truth[:, step])
+
+                # not used for training, hence we do argmax all the way
+                sequence.append(step_logits.argmax(dim=-1))
+                symbol_logprobs.append(step_logits)
+                logits.append(torch.zeros_like(step_logits[:, 0]))
+                entropy.append(logits[-1])
 
                 input = self.embedding(ground_truth[:, step])
-                output = step_logits.argmax(dim=-1)
 
-                sequence.append(output)
 
-            logits = torch.zeros(batch_size, self.max_len).to(encoder_state.device)
-            entropy = logits
-            sequence = torch.stack(sequence)
-            print(sequence.size()) #.permute(1, 0) 
-            exit(0)
+        sequence = torch.stack(sequence).permute(1, 0)
+        logits = torch.stack(logits).permute(1, 0)
+        entropy = torch.stack(entropy).permute(1, 0)
+        symbol_logprobs = torch.stack(symbol_logprobs).permute(1, 0, 2)
 
-        return sequence, logits, entropy
+        return (sequence, symbol_logprobs), logits, entropy
 
 
 
