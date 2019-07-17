@@ -35,9 +35,17 @@ class SequenceData:
             for j in range(max_len):
                 sequence.append(i % vocab_size)
                 i = i // vocab_size
+
+                if sequence[-1] == 0:
+                    to_add = max_len - len(sequence)
+                    sequence.extend([0] * to_add)
+                    break
+
             sequence.append(0)  # append eos if it didn't happen before
             self.sequences.append(sequence)
 
+        self.sequences = list(set([tuple(s) for s in self.sequences]))  # make them uniq
+        self.sequences.sort()
         self.sequences = [torch.tensor(s, dtype=torch.long) for s in self.sequences]
 
     def __getitem__(self, i):
