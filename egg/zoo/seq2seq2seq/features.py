@@ -3,6 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+from typing import List
+
 import pickle
 import torch.utils.data as data
 import torch.nn.parallel
@@ -13,16 +15,27 @@ import numpy as np
 
 
 class SequenceData:
-    def __init__(self, vocab_size, max_len, scale_factor=1000):
+    """
+    Always eos (zero) terminated strings
+    Returns:
+        [type] -- [description]
+    """
+    sequences: List[torch.tensor]
+
+    def __init__(self, vocab_size: int, max_len: int, scale_factor: int=1):
+        # TODO: make uniform wrt zero-terminated stuff
+        assert max_len > 1
+        assert scale_factor > 0
+        max_len -= 1  # account for the zero-termination
         self.scale_factor = scale_factor
 
         self.sequences = []
-
         for i in range(vocab_size ** max_len):
             sequence = []
             for j in range(max_len):
                 sequence.append(i % vocab_size)
                 i = i // vocab_size
+            sequence.append(0)  # append eos if it didn't happen before
             self.sequences.append(sequence)
 
         self.sequences = [torch.tensor(s, dtype=torch.long) for s in self.sequences]

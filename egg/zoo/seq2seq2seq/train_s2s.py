@@ -40,17 +40,25 @@ def accuracy_loss(sender_input, _message, _receiver_input, receiver_output, _lab
 
 
 def nll_teacher_forcing_loss(sender_input, _message, _receiver_input, receiver_output, _labels):
+    message_lengths = core.find_lengths(sender_input)
     output_sequence, output_logprobs = receiver_output
-    # TODO: find eos
-    loss = 0.0
     assert sender_input.size(1) == output_logprobs.size(1)
 
-    for step in range(sender_input.size(1)):
-        nll = F.nll_loss(output_logprobs[:, step, :], sender_input[:, step])
-        loss += nll
+    batch_size = sender_input.size(0)
 
-    acc = (output_sequence == sender_input).float().mean(dim=1)
-    return loss, {'acc': acc}
+    loss = 0.0
+    acc = 0.0
+    before_eos = torch.ones(batch_size).to(sender_input.device)
+
+    for step in range(sender_input.size(1)):
+        before_eos = before_eos * (step < message_lengths).float()
+
+        nll = F.nll_loss(output_logprobs[:, step, :], sender_input[:, step])
+
+        loss += nll * before_eos
+        acc += (sender_input[:, step] == output_sequence[:, step]).float() * before_eos
+
+    return loss, {'acc': acc / message_lengths.float()}
 
 if __name__ == "__main__":
     opts = get_params()
@@ -81,15 +89,25 @@ if __name__ == "__main__":
     trainer.train(n_epochs=opts.n_epochs)
 
     sender_inputs, messages, _, receiver_outputs, labels = \
-        core.dump_sender_receiver(game, validation_loader, gs=False, device=device, variable_length=False)#True)
+        core.dump_sender_receiver(game, validation_loader, gs=False, device=device, variable_length=False)
+
+    def trim_tensor_by_len(t):
+        l = core.find_lengths(t.unsqueeze(0)).item()
+        return t[:l]
 
     for seq, message, output in zip(sender_inputs, messages, receiver_outputs):
+        output_len = core.find_lengths(output.unsqueeze(0)).item()
+        seq = trim_tensor_by_len(seq)
+        message = trim_tensor_by_len(message)
+        output = trim_tensor_by_len(output)
         print(f'{seq} -> {message} -> {output}')
 
     core.close()
 
 # TODO:
-# * eos in inputs/outputs
+# * eos in inputs/outputs when dumping
+# better dataset wrt zeros
+# * sort by length etc
 # * joint training
 # * separate encoder class from the Receiver everywhere
 # * have Transformer encoder

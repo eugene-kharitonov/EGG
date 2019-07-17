@@ -5,7 +5,7 @@
 
 import torch.nn as nn
 import torch.nn.functional as F
-from egg.core import RnnSenderReinforce
+import egg.core as core
 import torch
 from torch.distributions import Categorical
 
@@ -14,7 +14,7 @@ class Sender(nn.Module):
     def __init__(self, input_vocab_size, output_vocab_size, emb_dim, n_hidden, max_len, num_layers=1, encoder_cell='rnn', decoder_cell='rnn'):
         super(Sender, self).__init__()
         encoder = Encoder(encoder_cell, emb_dim, n_hidden, input_vocab_size)
-        self.pseudo_agent = RnnSenderReinforce(encoder, output_vocab_size, emb_dim, n_hidden, max_len, num_layers, decoder_cell, force_eos=False)#True)
+        self.pseudo_agent = core.RnnSenderReinforce(encoder, output_vocab_size, emb_dim, n_hidden, max_len, num_layers, decoder_cell, force_eos=False)#True)
 
     def forward(self, x):
         result = self.pseudo_agent(x)
@@ -133,9 +133,11 @@ class Decoder(nn.Module):
         return (sequence, symbol_logprobs), logits, entropy
 
 
-
 class Encoder(nn.Module):
     # TODO: encoder should be a part of Receiver wrapper
+    # TODO: add Transformer as an abstraction
+    # TODO: attention
+
     def __init__(self, cell, emb_dim, n_hidden, vocab_size):
         super(Encoder, self).__init__()
 
@@ -153,12 +155,11 @@ class Encoder(nn.Module):
         self.embedding = nn.Embedding(vocab_size, emb_dim)
 
     def forward(self, message, message_lengths=None):
-        # TODO: enable variable length messages
-        #messages, lengths = x
         emb = self.embedding(message)
-        lengths = torch.zeros(message.size(0)).fill_(message.size(1)).long()
+        if message_lengths is None:
+            message_lengths = core.find_lengths(message)
 
-        packed = nn.utils.rnn.pack_padded_sequence(emb, lengths, batch_first=True)
+        packed = nn.utils.rnn.pack_padded_sequence(emb, message_lengths, batch_first=True, enforce_sorted=False)
         _, rnn_hidden = self.cell(packed)
         if isinstance(rnn_hidden, tuple):  # lstm returns c_n, don't need it
             rnn_hidden = rnn_hidden[0]
@@ -168,13 +169,13 @@ class Encoder(nn.Module):
 
 
 class CopySender(nn.Module):
+
     def __init__(self):
         return super().__init__()
 
 
     def forward(self, x):
         batch_size = x.size(0)
-        message_length = x.size(1)
 
         entropy = torch.zeros_like(x).float()
         logprob = torch.zeros_like(x).float()

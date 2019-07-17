@@ -48,5 +48,6 @@ __all__ = [
     'SymbolReceiverWrapper',
     'TransformerReceiverDeterministic',
     'TransformerSenderReinforce',
-    'RnnEncoder'
+    'RnnEncoder',
+    'find_lengths'
 ]
