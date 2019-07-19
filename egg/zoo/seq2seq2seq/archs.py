@@ -14,7 +14,7 @@ class Sender(nn.Module):
     def __init__(self, input_vocab_size, output_vocab_size, emb_dim, n_hidden, max_len, num_layers=1, encoder_cell='rnn', decoder_cell='rnn'):
         super(Sender, self).__init__()
         encoder = Encoder(encoder_cell, emb_dim, n_hidden, input_vocab_size)
-        self.pseudo_agent = core.RnnSenderReinforce(encoder, output_vocab_size, emb_dim, n_hidden, max_len, num_layers, decoder_cell, force_eos=False)#True)
+        self.pseudo_agent = core.RnnSenderReinforce(encoder, output_vocab_size, emb_dim, n_hidden, max_len, num_layers, decoder_cell, force_eos=True)
 
     def forward(self, x):
         result = self.pseudo_agent(x)
@@ -181,3 +181,28 @@ class CopySender(nn.Module):
         logprob = torch.zeros_like(x).float()
 
         return x, entropy, logprob
+
+
+def nll_teacher_forcing_loss(sender_input, _message, _receiver_input, receiver_output, _labels):
+    message_lengths = core.find_lengths(sender_input)
+    output_sequence, output_logprobs = receiver_output
+    assert sender_input.size(1) == output_logprobs.size(1)
+
+    batch_size = sender_input.size(0)
+
+    loss = 0.0
+    acc = 0.0
+    before_eos = torch.ones(batch_size).to(sender_input.device)
+
+    for step in range(sender_input.size(1)):
+        before_eos = before_eos * (step < message_lengths).float()
+
+        nll = F.nll_loss(output_logprobs[:, step, :], sender_input[:, step])
+
+        loss += nll * before_eos
+        acc += (sender_input[:, step] == output_sequence[:, step]).float() * before_eos
+
+    acc = (acc.long() == message_lengths).float()
+    return loss, {'acc': acc}
+
+

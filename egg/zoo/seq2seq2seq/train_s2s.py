@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.utils.data as data
 import egg.core as core
 from egg.zoo.seq2seq2seq.features import SequenceData
-from egg.zoo.seq2seq2seq.archs import Sender, Receiver, CopySender
+from egg.zoo.seq2seq2seq.archs import Sender, Receiver, CopySender, nll_teacher_forcing_loss
 
 
 def get_params():
@@ -32,34 +32,6 @@ def get_params():
 
     return args
 
-
-def accuracy_loss(sender_input, _message, _receiver_input, receiver_output, _labels):
-    output_sequence, _output_logprobs = receiver_output
-    acc = (output_sequence == sender_input).float().mean(dim=1)
-    return -acc, {'acc': acc}
-
-
-def nll_teacher_forcing_loss(sender_input, _message, _receiver_input, receiver_output, _labels):
-    message_lengths = core.find_lengths(sender_input)
-    output_sequence, output_logprobs = receiver_output
-    assert sender_input.size(1) == output_logprobs.size(1)
-
-    batch_size = sender_input.size(0)
-
-    loss = 0.0
-    acc = 0.0
-    before_eos = torch.ones(batch_size).to(sender_input.device)
-
-    for step in range(sender_input.size(1)):
-        before_eos = before_eos * (step < message_lengths).float()
-
-        nll = F.nll_loss(output_logprobs[:, step, :], sender_input[:, step])
-
-        loss += nll * before_eos
-        acc += (sender_input[:, step] == output_sequence[:, step]).float() * before_eos
-
-    return loss, {'acc': acc / message_lengths.float()}
-
 if __name__ == "__main__":
     opts = get_params()
 
@@ -76,12 +48,7 @@ if __name__ == "__main__":
 
     sender = CopySender()
 
-    if opts.no_teacher_forcing:
-        loss = accuracy_loss
-    else:
-        loss = nll_teacher_forcing_loss
-
-    game = core.SenderReceiverRnnReinforce(sender, receiver, loss, sender_entropy_coeff=0.0, receiver_entropy_coeff=0.05)
+    game = core.SenderReceiverRnnReinforce(sender, receiver, nll_teacher_forcing_loss, sender_entropy_coeff=0.0, receiver_entropy_coeff=0.05)
     optimizer = core.build_optimizer(game.parameters())
 
     trainer = core.Trainer(game=game, optimizer=optimizer, train_data=train_loader, validation_data=validation_loader)
@@ -105,9 +72,6 @@ if __name__ == "__main__":
     core.close()
 
 # TODO:
-# * eos in inputs/outputs when dumping
-# better dataset wrt zeros
-# * sort by length etc
 # * joint training
 # * separate encoder class from the Receiver everywhere
 # * have Transformer encoder
