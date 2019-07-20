@@ -120,13 +120,7 @@ class RelaxedEmbedding(nn.Embedding):
     1
     """
     def forward(self, x):
-<<<<<<< HEAD
         if isinstance(x, torch.LongTensor) or (torch.cuda.is_available() and isinstance(x, torch.cuda.LongTensor)):
-=======
-        if not isinstance(x, (torch.LongTensor, torch.cuda.LongTensor)):
-            return torch.matmul(x, self.weight)
-        else:
->>>>>>> fix testing for tensor type in relaxed embedding
             return F.embedding(x, self.weight, self.padding_idx, self.max_norm, self.norm_type, self.scale_grad_by_freq, self.sparse)
         else:
             return torch.matmul(x, self.weight)

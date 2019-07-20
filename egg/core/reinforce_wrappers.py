@@ -13,13 +13,9 @@ import numpy as np
 
 
 from .transformer import TransformerEncoder, TransformerDecoder
-<<<<<<< HEAD
 from .rnn import RnnEncoder
 from .util import find_lengths
 
-=======
-from .util import find_lengths
->>>>>>> var length inputs/outputs
 
 class ReinforceWrapper(nn.Module):
     """
@@ -135,30 +131,6 @@ class SymbolGameReinforce(nn.Module):
         return full_loss, rest_info
 
 
-<<<<<<< HEAD
-=======
-def _get_batch_permutation(lengths):
-    """
-    Returns a permutation and its reverse that turns `lengths` in a sorted
-    list in descending order.
-    >>> lengths = torch.tensor([4, 1, 0, 100])
-    >>> permutation, inverse = _get_batch_permutation(lengths)
-    >>> permutation
-    tensor([3, 0, 1, 2])
-    >>> rearranged = torch.index_select(lengths, 0, permutation)
-    >>> rearranged
-    tensor([100,   4,   1,   0])
-    >>> torch.index_select(rearranged, 0, inverse)
-    tensor([  4,   1,   0, 100])
-    """
-    _, rearrange = torch.sort(lengths, descending=True)
-    inverse = torch.empty_like(rearrange)
-    inverse.scatter_(0, rearrange,
-                    torch.arange(0, rearrange.numel(), device=rearrange.device))
-    return rearrange, inverse
-
-
->>>>>>> var length inputs/outputs
 class RnnSenderReinforce(nn.Module):
     """
     Reinforce Wrapper for Sender in variable-length message game. Assumes that during the forward,
@@ -283,28 +255,8 @@ class RnnReceiverReinforce(nn.Module):
         self.encoder = RnnEncoder(vocab_size, emb_dim, n_hidden, cell, num_layers)
 
     def forward(self, message, input=None, lengths=None):
-<<<<<<< HEAD
         encoded = self.encoder(message)
         sample, logits, entropy = self.agent(encoded, input)
-=======
-        emb = self.embedding(message)
-
-        if lengths is None:
-            lengths = find_lengths(message)
-
-        permutation, inverse = _get_batch_permutation(lengths)
-
-        emb = torch.index_select(emb, 0, permutation)
-        lengths = torch.index_select(lengths, 0, permutation)
-
-        packed = nn.utils.rnn.pack_padded_sequence(emb, lengths, batch_first=True)
-        _, rnn_hidden = self.cell(packed)
-
-        if isinstance(self.cell, nn.LSTM):
-            rnn_hidden, _ = rnn_hidden
-
-        sample, logits, entropy = self.agent(rnn_hidden[-1], input)
->>>>>>> var length inputs/outputs
 
         return sample, logits, entropy
 
@@ -342,28 +294,8 @@ class RnnReceiverDeterministic(nn.Module):
         self.encoder = RnnEncoder(vocab_size, emb_dim, n_hidden, cell, num_layers)
 
     def forward(self, message, input=None, lengths=None):
-<<<<<<< HEAD
         encoded = self.encoder(message)
         agent_output = self.agent(encoded, input)
-=======
-        emb = self.embedding(message)
-
-        if lengths is None:
-            lengths = find_lengths(message)
-        permutation, inverse = _get_batch_permutation(lengths)
-
-        emb = torch.index_select(emb, 0, permutation)
-        lengths = torch.index_select(lengths, 0, permutation)
-
-        packed = nn.utils.rnn.pack_padded_sequence(emb, lengths, batch_first=True)
-        _, rnn_hidden = self.cell(packed)
-
-        if isinstance(self.cell, nn.LSTM):
-            rnn_hidden, _ = rnn_hidden
-
-        agent_output = self.agent(rnn_hidden[-1], input)
-        agent_output = torch.index_select(agent_output, 0, inverse)
->>>>>>> var length inputs/outputs
 
         logits = torch.zeros(agent_output.size(0)).to(agent_output.device)
         entropy = logits

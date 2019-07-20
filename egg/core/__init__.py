@@ -5,7 +5,7 @@
 
 from .trainers import Trainer
 from .callbacks import Callback, ConsoleLogger, TensorboardLogger
-from .util import init, get_opts, build_optimizer, dump_sender_receiver, move_to, get_summary_writer, close
+from .util import init, get_opts, build_optimizer, dump_sender_receiver, move_to, get_summary_writer, close, find_lengths
 from .early_stopping import BaseEarlyStopper, EarlyStopperAccuracy
 from .gs_wrappers import (GumbelSoftmaxWrapper,
                           SymbolGameGS, RelaxedEmbedding,
