@@ -35,6 +35,9 @@ class Receiver(nn.Module):
         return sequence, log_probs.sum(dim=-1), entropies.sum(dim=-1)
 
 
+# TODO: transformer encoders/decoders, too
+# TODO: experimentation with GAN-style training tricks
+
 class Decoder(nn.Module):
     def __init__(self, vocab_size, emb_dim, n_hidden, max_len, teacher_forcing, num_layers=1, cell='rnn'):
         super(Decoder, self).__init__()
