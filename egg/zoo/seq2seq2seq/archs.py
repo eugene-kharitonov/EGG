@@ -13,7 +13,7 @@ from torch.distributions import Categorical
 class Sender(nn.Module):
     def __init__(self, input_vocab_size, output_vocab_size, emb_dim, n_hidden, max_len, num_layers=1, encoder_cell='rnn', decoder_cell='rnn'):
         super(Sender, self).__init__()
-        encoder = Encoder(encoder_cell, emb_dim, n_hidden, input_vocab_size)
+        self.encoder = core.RnnEncoder(input_vocab_size, emb_dim, n_hidden, encoder_cell, num_layers)
         self.pseudo_agent = core.RnnSenderReinforce(encoder, output_vocab_size, emb_dim, n_hidden, max_len, num_layers, decoder_cell, force_eos=True)
 
     def forward(self, x):
@@ -24,7 +24,7 @@ class Sender(nn.Module):
 class Receiver(nn.Module):
     def __init__(self, input_vocab_size, output_vocab_size, emb_dim, n_hidden, output_max_len, teacher_forcing, num_layers=1, encoder_cell='rnn', decoder_cell='rnn'):
         super(Receiver, self).__init__()
-        self.encoder = Encoder(encoder_cell, emb_dim, n_hidden, input_vocab_size)
+        self.encoder = core.RnnEncoder(input_vocab_size, emb_dim, n_hidden, encoder_cell, num_layers)
         self.decoder = Decoder(output_vocab_size, emb_dim, n_hidden, output_max_len, teacher_forcing, num_layers, decoder_cell)
         self.teacher_forcing = teacher_forcing
 
@@ -131,41 +131,6 @@ class Decoder(nn.Module):
         symbol_logprobs = torch.stack(symbol_logprobs).permute(1, 0, 2)
 
         return (sequence, symbol_logprobs), logits, entropy
-
-
-class Encoder(nn.Module):
-    # TODO: encoder should be a part of Receiver wrapper
-    # TODO: add Transformer as an abstraction
-    # TODO: attention
-
-    def __init__(self, cell, emb_dim, n_hidden, vocab_size):
-        super(Encoder, self).__init__()
-
-        self.encoder_cell = None
-        cell = cell.lower()
-        if cell == 'rnn':
-            self.cell = nn.RNN(input_size=emb_dim, batch_first=True, hidden_size=n_hidden, num_layers=1)
-        elif cell == 'gru':
-            self.cell = nn.GRU(input_size=emb_dim, batch_first=True, hidden_size=n_hidden, num_layers=1)
-        elif cell == 'lstm':
-            self.cell = nn.LSTM(input_size=emb_dim, batch_first=True, hidden_size=n_hidden, num_layers=1)
-        else:
-            raise ValueError(f"Unknown RNN Cell: {cell}")
-
-        self.embedding = nn.Embedding(vocab_size, emb_dim)
-
-    def forward(self, message, message_lengths=None):
-        emb = self.embedding(message)
-        if message_lengths is None:
-            message_lengths = core.find_lengths(message)
-
-        packed = nn.utils.rnn.pack_padded_sequence(emb, message_lengths, batch_first=True, enforce_sorted=False)
-        _, rnn_hidden = self.cell(packed)
-        if isinstance(rnn_hidden, tuple):  # lstm returns c_n, don't need it
-            rnn_hidden = rnn_hidden[0]
-        hidden = rnn_hidden.squeeze(0)
-        return hidden
-
 
 
 class CopySender(nn.Module):
