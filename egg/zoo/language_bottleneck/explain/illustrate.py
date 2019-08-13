@@ -10,7 +10,7 @@ import egg.core as core
 import torch
 import numpy as np
 import torch.nn.functional as F
-
+from collections import defaultdict
 
 class CallbackEvaluator(core.Callback):
     def __init__(self, dataset, device):
@@ -23,6 +23,10 @@ class CallbackEvaluator(core.Callback):
         game.eval()
         game.epochs = self.epoch + 1
 
+        substr2decision = {}
+        substr2total = defaultdict(int)
+        substr2correct = defaultdict(int)
+
         if self.epoch % 5 == 0:
             for batch in self.dataset:
                 x, y = core.move_to(batch, self.device)
@@ -31,7 +35,6 @@ class CallbackEvaluator(core.Callback):
 
                 x = x[0, :].tolist()
                 attention = attention[0, :].tolist()
-                #print('att', attention)
                 y = ''.join([str(i) for i in y[0, :].tolist()])
                 predicted = ''.join([str(i) for i in (predicted[0, :] > 0.5).tolist()])
 
@@ -45,8 +48,22 @@ class CallbackEvaluator(core.Callback):
                         break
                     else:
                         combined.append(str(symbol))
-                print(''.join(combined), '->', predicted, '/', y)
+                combined = ''.join(combined)
 
-        print('prbos', F.sigmoid(game.masker.prob_mask_logits))
+                substr2decision[combined] = predicted
+                substr2total[combined] += 1
+                substr2correct[combined] += 1 if predicted == y else 0
+
+            substrings = list(substr2decision.keys())
+            substrings.sort(key = lambda x: substr2total[x], reverse=True)
+
+            for substr in substrings:
+                predicted = substr2decision[substr]
+                correct = substr2correct[substr] 
+                total = substr2total[substr]
+
+                print(substr, '->', predicted, 'correct: ', correct, '/', total)
+
+        print('probs', F.sigmoid(game.masker.prob_mask_logits))
         game.train()
         self.epoch += 1
