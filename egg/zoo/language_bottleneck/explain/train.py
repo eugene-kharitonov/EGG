@@ -40,24 +40,27 @@ def main(params):
     opts = get_params(params)
     device = opts.device
 
-    train_data = LangData(opts.language, scale_factor=100, transpose=True, prediction_mask=opts.prediction_mask, source_mask=opts.source_mask)
+    prediction_mask = ''.join(['?'] * 8)
+    source_mask = ''.join(['?'] * 10)
+
+    train_data = LangData(opts.language, scale_factor=100, transpose=True, prediction_mask=prediction_mask, source_mask=source_mask)
     train_loader = torch.utils.data.DataLoader(train_data, shuffle=True, batch_size=opts.batch_size)
-    test_data = LangData(opts.language, scale_factor=1, transpose=True, prediction_mask=opts.prediction_mask, source_mask=opts.source_mask)
+    test_data = LangData(opts.language, scale_factor=1, transpose=True, prediction_mask=prediction_mask, source_mask=source_mask)
     test_loader = torch.utils.data.DataLoader(test_data, shuffle=False, batch_size=1)
 
-    n_bits = len([x for x in opts.prediction_mask if x == '?'])
-
+    n_bits = 8
     max_len = 10
-    if opts.source_mask:
-        max_len = len([x for x in opts.source_mask if x == '?'])
 
-    explainer = Explainer(vocab_size=8, max_len=max_len, n_bits=n_bits)
+    explainer = Explainer(vocab_size=8, max_len=max_len, n_bits=1)
+    adv_explainer = Explainer(vocab_size=8, max_len=max_len, n_bits=1)
     masker = Masker(vocab_size=8, max_len=max_len, prior=opts.prior)
-    game = Game(masker, explainer, opts.coeff)
+
+    game = Game(masker, explainer, adv_explainer, opts.coeff)
 
     optimizer = torch.optim.Adam(
         [
             dict(params=explainer.parameters(), lr=opts.lr_e),
+            dict(params=adv_explainer.parameters(), lr=opts.lr_e),
             dict(params=masker.parameters(), lr=opts.lr_m)
         ])
 

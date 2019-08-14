@@ -54,6 +54,7 @@ class LangData:
         if transpose:
             self.codes, self.inputs = self.inputs, self.codes
 
+        assert len(self.codes) == len(self.inputs)
         self.scale_factor = scale_factor
 
     def __len__(self):
