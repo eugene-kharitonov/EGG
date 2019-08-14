@@ -27,11 +27,11 @@ class CallbackEvaluator(core.Callback):
         substr2total = defaultdict(int)
         substr2correct = defaultdict(int)
 
-        if self.epoch % 5 == 0:
+        if False:#self.epoch % 5 == 0:
             for batch in self.dataset:
                 x, y = core.move_to(batch, self.device)
                 masked_seq, logits, attention = game.masker(x)
-                predicted = game.explainer(x)
+                predicted = game.explainer_X(x)
 
                 x = x[0, :].tolist()
                 attention = attention[0, :].tolist()
@@ -57,12 +57,12 @@ class CallbackEvaluator(core.Callback):
             substrings = list(substr2decision.keys())
             substrings.sort(key = lambda x: substr2total[x], reverse=True)
 
-            for substr in substrings:
-                predicted = substr2decision[substr]
-                correct = substr2correct[substr] 
-                total = substr2total[substr]
+            #for substr in substrings:
+            #    predicted = substr2decision[substr]
+            #    correct = substr2correct[substr] 
+            #    total = substr2total[substr]
 
-                print(substr, '->', predicted, 'correct: ', correct, '/', total)
+            #    print(substr, '->', predicted, 'correct: ', correct, '/', total)
 
         print('probs', F.sigmoid(game.masker.prob_mask_logits))
         game.train()
