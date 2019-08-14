@@ -52,7 +52,7 @@ def main(params):
     max_len = 10
 
     explainer = Explainer(vocab_size=8, max_len=max_len, n_bits=1)
-    adv_explainer = Explainer(vocab_size=8, max_len=max_len, n_bits=1)
+    adv_explainer = Explainer(vocab_size=8, max_len=max_len, n_bits=7)
     masker = Masker(vocab_size=8, max_len=max_len, prior=opts.prior)
 
     game = Game(masker, explainer, adv_explainer, opts.coeff)

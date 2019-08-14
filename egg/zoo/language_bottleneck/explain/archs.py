@@ -38,7 +38,7 @@ class Masker(nn.Module):
         extended_logits = self.prob_mask_logits.unsqueeze(0).expand((batch_size, sequence.size(1)))
 
         hard_attention_distr = Bernoulli(logits=extended_logits)
-        if True: #self.training:
+        if self.training:
             hard_mask = hard_attention_distr.sample()
         else:
             hard_mask = (extended_logits > 0.0).float()
@@ -87,33 +87,47 @@ class Explainer(nn.Module):
 
 
 class Game(nn.Module):
-    def __init__(self, masker, n_bits, target_bit):
+    def __init__(self, masker, explainer_X, explainer_Y, l):
         super().__init__()
 
         self.masker = masker
-        self.explainer_X = Explainer()
+        self.explainer_X = explainer_X
         self.explainer_Y = explainer_Y
 
         self.l = l
 
     def forward(self, sequence, labels, _other=None):
-        bit_x = 0
-        bit_y = 2
+        bit_x = 3
 
         masked_sequence, logits, hard_mask = self.masker(sequence)
         predicted_Y = self.explainer_Y(masked_sequence)
         predicted_X = self.explainer_X(masked_sequence)
 
-        loss_X = F.binary_cross_entropy(predicted_X[:, 0], labels.float()[:, bit_x], reduction='none')#.mean(dim=-1)
-        loss_Y = F.binary_cross_entropy(predicted_Y[:, 0], labels.float()[:, bit_y], reduction='none')#.mean(dim=-1)
+        rows_y = [i for i in range(8) if i != bit_x]
+        labels_y = labels[:, rows_y]
 
-        loss_XY = loss_X - loss_Y
+        loss_X = F.binary_cross_entropy(predicted_X[:, 0], labels.float()[:, bit_x], reduction='none')#.mean(dim=-1)
+        loss_Y = F.binary_cross_entropy(predicted_Y, labels_y.float(), reduction='none').mean(dim=-1)
+
+        loss_XY = 2 * loss_X - loss_Y
         loss_supp = (loss_XY.detach() * logits).mean()
 
-        loss = loss_X + loss_Y + loss_supp
+        regularisation_loss = (1.0 - self.masker.prob_mask_logits.sigmoid()).pow(2.0).sum()
+
+        loss = loss_X + loss_Y + loss_supp + self.l * regularisation_loss
 
         acc_X = ((predicted_X > 0.5).view(-1).long() == labels[:, bit_x]).float()
-        acc_Y = ((predicted_Y > 0.5).view(-1).long() == labels[:, bit_y]).float()
+        acc_Y_mean = ((predicted_Y > 0.5).long() == labels_y).float().mean(dim=-1)
 
         nnz_att = hard_mask.float().sum(dim=-1)
-        return loss.mean(), {'acc_X': acc_X, 'acc_Y': acc_Y, 'nnz': nnz_att}
+        info = {'acc_X': acc_X, 'acc_Y_mean': acc_Y_mean, 'zeroes': nnz_att}
+        
+        for i in range(7):
+            key = f'adv_acc_{i}' 
+            if key not in info: info[key] = 0.0
+
+            acc_Y = ((predicted_Y[:, i] > 0.5).view(-1).long() == labels_y[:, i]).float().mean(dim=0)
+            info[key] += acc_Y
+
+
+        return loss.mean(), info
