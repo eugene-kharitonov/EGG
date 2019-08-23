@@ -28,7 +28,7 @@ def read_file(fname, prediction_mask, source_mask):
 
     max_code_len = max(len(x) for x in codes)
     average_len = sum(len(x) for x in codes) / len(codes)
-    print(f'Max length is {max_code_len}, average code length is {average_len}')
+    print(f'# Max length is {max_code_len}, average code length is {average_len}')
     expanded_codes = []
 
     for code in codes:
@@ -38,8 +38,10 @@ def read_file(fname, prediction_mask, source_mask):
         assert len(code) == max_code_len
 
         if source_mask:
-            assert len(code) <= len(source_mask), f'{len(code)} {len(source_mask)}'
-            code = [z for (z,m) in zip(code, source_mask) if m == '?']
+            assert len(code) == len(source_mask), f'{len(code)} {len(source_mask)}'
+            for i, s in enumerate(source_mask):
+                if s == 'x':
+                    code[i] = 1
 
         code = torch.tensor(code, dtype=torch.int64)
         expanded_codes.append(code)

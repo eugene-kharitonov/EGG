@@ -28,10 +28,16 @@ def grad_reverse(x, lambd):
 """
 
 class Masker(nn.Module):
-    def __init__(self, vocab_size, max_len, prior=0.0):
+    def __init__(self, vocab_size, max_len, prior=0.0, mask=None):
         super().__init__()
-        self.prob_mask_logits = torch.nn.Parameter(torch.zeros(max_len) + prior)
+        self.prob_mask_logits = torch.zeros(max_len).fill_(prior)
+        if mask is not None:
+            assert len(mask) == max_len
+            for i, v in enumerate(mask):
+                if v == 'x': self.prob_mask_logits[i] = +100
+        self.prob_mask_logits = torch.nn.Parameter(self.prob_mask_logits)
         self.replace_id = torch.tensor([vocab_size + 1]).long()
+        self.pre_mask = mask
 
     def forward(self, sequence):
         batch_size = sequence.size(0)
@@ -56,10 +62,10 @@ class Explainer(nn.Module):
 
         self.encoder = core.TransformerBaseEncoder(vocab_size=vocab_size + 2, 
                 max_len=max_len + 1, 
-                embed_dim=10, num_heads=2,
-                hidden_size=20, num_layers=3)
+                embed_dim=32, num_heads=4,
+                hidden_size=64, num_layers=3)
 
-        self.predictor = nn.Linear(10, n_bits)
+        self.predictor = nn.Linear(32, n_bits)
 
         self.sos_id = torch.tensor([vocab_size]).long()
 
@@ -87,29 +93,31 @@ class Explainer(nn.Module):
 
 
 class Game(nn.Module):
-    def __init__(self, masker, explainer_X, explainer_Y, l):
+    def __init__(self, masker, explainer_X, explainer_Y, bit_x, l, preference_x):
         super().__init__()
 
         self.masker = masker
         self.explainer_X = explainer_X
         self.explainer_Y = explainer_Y
+        self.preference_x = preference_x
 
         self.l = l
+        self.bit_x = bit_x
 
     def forward(self, sequence, labels, _other=None):
-        bit_x = 3
+        bit_x = self.bit_x
 
         masked_sequence, logits, hard_mask = self.masker(sequence)
         predicted_Y = self.explainer_Y(masked_sequence)
         predicted_X = self.explainer_X(masked_sequence)
 
-        rows_y = [i for i in range(8) if i != bit_x]
-        labels_y = labels[:, rows_y]
+        #rows_y = [i for i in range(8) if i != bit_x]
+        #labels_y = labels[:, rows_y]
 
         loss_X = F.binary_cross_entropy(predicted_X[:, 0], labels.float()[:, bit_x], reduction='none')#.mean(dim=-1)
-        loss_Y = F.binary_cross_entropy(predicted_Y, labels_y.float(), reduction='none').mean(dim=-1)
+        loss_Y = F.binary_cross_entropy(predicted_Y, labels.float(), reduction='none').mean(dim=-1)
 
-        loss_XY = 2 * loss_X - loss_Y
+        loss_XY = self.preference_x * loss_X - loss_Y
         loss_supp = (loss_XY.detach() * logits).mean()
 
         regularisation_loss = (1.0 - self.masker.prob_mask_logits.sigmoid()).pow(2.0).sum()
@@ -117,16 +125,17 @@ class Game(nn.Module):
         loss = loss_X + loss_Y + loss_supp + self.l * regularisation_loss
 
         acc_X = ((predicted_X > 0.5).view(-1).long() == labels[:, bit_x]).float()
-        acc_Y_mean = ((predicted_Y > 0.5).long() == labels_y).float().mean(dim=-1)
+        acc_Y_mean = ((predicted_Y > 0.5).long() == labels).float().mean(dim=-1)
 
         nnz_att = hard_mask.float().sum(dim=-1)
+
         info = {'acc_X': acc_X, 'acc_Y_mean': acc_Y_mean, 'zeroes': nnz_att}
         
-        for i in range(7):
+        for i in range(8):
             key = f'adv_acc_{i}' 
             if key not in info: info[key] = 0.0
 
-            acc_Y = ((predicted_Y[:, i] > 0.5).view(-1).long() == labels_y[:, i]).float().mean(dim=0)
+            acc_Y = ((predicted_Y[:, i] > 0.5).view(-1).long() == labels[:, i]).float().mean(dim=0)
             info[key] += acc_Y
 
 

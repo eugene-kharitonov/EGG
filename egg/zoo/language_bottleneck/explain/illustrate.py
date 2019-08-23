@@ -64,6 +64,11 @@ class CallbackEvaluator(core.Callback):
 
             #    print(substr, '->', predicted, 'correct: ', correct, '/', total)
 
-        print('probs', F.sigmoid(game.masker.prob_mask_logits))
+        probs = F.sigmoid(game.masker.prob_mask_logits).detach().tolist()
+        bit_x = game.bit_x
+        mask = game.masker.pre_mask
+
+        s = json.dumps({"mode": "info", "probs": probs, "bit_x": bit_x, 'mask': mask})
+        print(s)
         game.train()
         self.epoch += 1

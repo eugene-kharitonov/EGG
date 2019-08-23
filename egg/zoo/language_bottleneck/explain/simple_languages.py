@@ -42,10 +42,10 @@ if __name__ == '__main__':
 
             translation = []
     
-            while number and len(translation) < args.max_len:
+            while number and len(translation) < args.max_len - 1:
                 translation.append(number % args.vocab_size)
                 number = number // args.vocab_size
-            translation = ' '.join([str(x) for x in translation])
+            translation = [str(x + 1) for x in translation]
         elif args.language.startswith('base-'):
             base = args.language[5:]
             base = int(base)
@@ -54,19 +54,24 @@ if __name__ == '__main__':
             number = int(meaning, 2)
             if base == 2:
                 translation = '{0:b}'.format(number)
-            elif base == 16:
-                translation = '{0:x}'.format(number)
+            #elif base == 16:
+            #    translation = '{0:x}'.format(number)
             elif base == 8:
                 translation = '{0:o}'.format(number)
             elif base == 10:
                 translation = f'{number}'
+            else:
+                assert False
+
             l = len(translation)
-            if l < args.max_len:
-                prefix = ['0'] * (args.max_len - len(translation))
+            if l < args.max_len - 1:
+                prefix = [0] * (args.max_len - len(translation) - 1)
                 prefix.extend(translation)
                 translation = prefix
+            translation = [str(int(x) + 1) for x in translation]
+        translation.append('0')
 
-            translation = ' '.join(translation)
+        translation = ' '.join(translation)
 
 
         print(f'{meaning} -> {translation} -> {meaning}')
