@@ -28,25 +28,18 @@ def get_params(params):
     parser.add_argument('--scaler', type=int, default=10)
     parser.add_argument('--hidden', type=int, default=10,
                         help='')
-    parser.add_argument('--entropy_coeff', type=float, default=1e-2,
-                        help="")
-    parser.add_argument('--prediction_mask', type=str, default='?xxxxxxx')
+    #parser.add_argument('--entropy_coeff', type=float, default=1e-2,
+    #                    help="")
+    parser.add_argument('--prediction_mask', type=str, default=None)
     parser.add_argument('--source_mask', type=str, default=None)
     parser.add_argument('--language', type=str, default='vocab8_language_1.txt')
     parser.add_argument('--preference_x', type=float, default=2)
 
-    parser.add_argument('--n_bits', type=int, default=8)
+    #parser.add_argument('--n_bits', type=int, default=8)
     parser.add_argument('--target', type=int, default=0)
     parser.add_argument('--reverse_game', action='store_true')
 
     args = core.init(arg_parser=parser, params=params)
-    assert len(args.prediction_mask) == 8
-
-    if args.reverse_game:
-        assert 0 <= args.target < args.max_len
-    else:
-        assert 0 <= args.target < args.n_bits
-
     return args
 
 def pruned_mask(probs, old_mask):
@@ -66,12 +59,30 @@ def pruned_mask(probs, old_mask):
             break
     return ''.join(old_mask)
 
+def get_language_opts(path):
+    with open(path, 'r') as f:
+        h = f.readline()[1:]
+        h = json.loads(h)
+    return h
+
 def main(params):
     opts = get_params(params)
     device = opts.device
 
-    prediction_mask = ''.join(['?'] * 8)
-    source_mask = (''.join(['?'] * 9 + ['x'])) if not opts.source_mask else opts.source_mask
+
+    language_opts = get_language_opts(opts.language)
+    print(language_opts)
+
+    opts.max_len = language_opts['max_len']
+    opts.n_bits = language_opts['n_bits']
+
+    if opts.reverse_game:
+        assert 0 <= opts.target < opts.max_len
+    else:
+        assert 0 <= opts.target < opts.n_bits
+
+    prediction_mask = ''.join(['?'] * opts.n_bits) if opts.prediction_mask is None else opts.prediction_mask
+    source_mask = (''.join(['?'] * (opts.max_len - 1) + ['x'])) if opts.source_mask is None else opts.source_mask
 
     train_data = LangData(opts.language, scale_factor=100, transpose=True, prediction_mask=prediction_mask, source_mask=source_mask)
     train_loader = torch.utils.data.DataLoader(train_data, shuffle=True, batch_size=opts.batch_size)
@@ -95,7 +106,7 @@ def explain_symbol(opts, train_loader, test_loader):
     max_len = opts.max_len
     vocab_size = opts.vocab_size
     device = opts.device
-    prediction_mask = ''.join(['?'] * 8)
+    prediction_mask = ''.join(['?'] * n_bits)
 
     for _ in range(n_bits + 1):
         print('# starting with a mask', prediction_mask)

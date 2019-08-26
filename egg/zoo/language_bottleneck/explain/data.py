@@ -15,6 +15,7 @@ def read_file(fname, prediction_mask, source_mask):
 
     with open(fname, 'r') as fin:
         for line in fin:
+            if line.startswith('#'): continue
             line = line.split()
 
             inp = [int(x) for x in line[0]]
