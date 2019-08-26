@@ -64,10 +64,8 @@ class ConsoleLogger(Callback):
         self.epoch_counter += 1
 
     def _get_metric(self, metric: Union[torch.Tensor, float]) -> float:
-        if torch.is_tensor(metric) and metric.dim() > 1:
+        if torch.is_tensor(metric):
             return metric.mean().item()
-        elif torch.is_tensor(metric):
-            return metric.item()
         elif type(metric) == float:
             return metric
         else:
