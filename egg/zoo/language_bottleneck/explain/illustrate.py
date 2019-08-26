@@ -65,10 +65,74 @@ class CallbackEvaluator(core.Callback):
             #    print(substr, '->', predicted, 'correct: ', correct, '/', total)
 
         probs = F.sigmoid(game.masker.prob_mask_logits).detach().tolist()
-        bit_x = game.bit_x
+        bit_x = game.target_position
         mask = game.masker.pre_mask
 
         s = json.dumps({"mode": "info", "probs": probs, "bit_x": bit_x, 'mask': mask})
         print(s)
         game.train()
         self.epoch += 1
+
+
+class ReverseStopper(core.Callback):
+    def __init__(self):
+        self.epoch = 0
+        self.test_accuracy
+
+    def on_epoch_end(self, loss: float, logs: Dict[str, Any] = None):
+        game = self.trainer.game
+        game.eval()
+        game.epochs = self.epoch + 1
+
+        substr2decision = {}
+        substr2total = defaultdict(int)
+        substr2correct = defaultdict(int)
+
+        if False:#self.epoch % 5 == 0:
+            for batch in self.dataset:
+                x, y = core.move_to(batch, self.device)
+                masked_seq, logits, attention = game.masker(x)
+                predicted = game.explainer_X(x)
+
+                x = x[0, :].tolist()
+                attention = attention[0, :].tolist()
+                y = ''.join([str(i) for i in y[0, :].tolist()])
+                predicted = ''.join([str(i) for i in (predicted[0, :] > 0.5).tolist()])
+
+                combined = []
+
+                for symbol, att in zip(x, attention):
+                    if att == 1:
+                        combined.append('x')
+                    elif symbol == 0:
+                        combined.append('0')
+                        break
+                    else:
+                        combined.append(str(symbol))
+                combined = ''.join(combined)
+
+                substr2decision[combined] = predicted
+                substr2total[combined] += 1
+                substr2correct[combined] += 1 if predicted == y else 0
+
+            substrings = list(substr2decision.keys())
+            substrings.sort(key = lambda x: substr2total[x], reverse=True)
+
+            #for substr in substrings:
+            #    predicted = substr2decision[substr]
+            #    correct = substr2correct[substr] 
+            #    total = substr2total[substr]
+
+            #    print(substr, '->', predicted, 'correct: ', correct, '/', total)
+
+        probs = F.sigmoid(game.masker.prob_mask_logits).detach().tolist()
+        bit_x = game.target_position
+        mask = game.masker.pre_mask
+
+        s = json.dumps({"mode": "info", "probs": probs, "bit_x": bit_x, 'mask': mask})
+        print(s)
+        game.train()
+        self.epoch += 1
+
+
+
