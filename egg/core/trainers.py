@@ -177,6 +177,9 @@ class Trainer:
         """
         print(f'# loading trainer state from {path}')
         checkpoint = torch.load(path)
+        if isinstance(checkpoint, dict):
+            # compatibility
+            checkpoint = Checkpoint(epoch=checkpoint['epoch'], model_state_dict=checkpoint['model_state_dict'], optimizer_state_dict=checkpoint['optimizer_state_dict'])
         self.load(checkpoint)
 
     def load_from_latest(self, path):
