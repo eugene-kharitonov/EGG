@@ -28,15 +28,16 @@ def grad_reverse(x, lambd):
 """
 
 class Masker(nn.Module):
-    def __init__(self, vocab_size, max_len, prior=0.0, mask=None):
+    def __init__(self, replace_id, max_len, prior=0.0, mask=None):
         super().__init__()
         self.prob_mask_logits = torch.zeros(max_len).fill_(prior)
         if mask is not None:
             assert len(mask) == max_len
             for i, v in enumerate(mask):
                 if v == 'x': self.prob_mask_logits[i] = +100
+
         self.prob_mask_logits = torch.nn.Parameter(self.prob_mask_logits)
-        self.replace_id = torch.tensor([vocab_size + 1]).long()
+        self.replace_id = torch.tensor([replace_id]).long()
         self.pre_mask = mask
 
     def forward(self, sequence):
@@ -91,6 +92,21 @@ class Explainer(nn.Module):
         
         return predicted
 
+class ReverseExplainer(nn.Module):
+    def __init__(self, vocab_size, n_bits):
+        super().__init__()
+
+        self.predictor = nn.Sequential(
+            nn.Linear(n_bits, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, vocab_size),
+        )
+
+    def forward(self, bits):
+        x = self.predictor(bits.float())
+        return x
 
 class Game(nn.Module):
     def __init__(self, masker, explainer_X, explainer_Y, bit_x, l, preference_x):
@@ -102,7 +118,7 @@ class Game(nn.Module):
         self.preference_x = preference_x
 
         self.l = l
-        self.bit_x = bit_x
+        self.target_position = bit_x
 
     def forward(self, sequence, labels, _other=None):
         bit_x = self.bit_x
@@ -139,4 +155,35 @@ class Game(nn.Module):
             info[key] += acc_Y
 
 
+        return loss.mean(), info
+
+
+class ReverseGame(nn.Module):
+    def __init__(self, masker, explainer_X, target_position, l):
+        super().__init__()
+
+        self.masker = masker
+        self.explainer_X = explainer_X
+
+        self.l = l
+        self.target_position = target_position
+
+    def forward(self, utterance, bits, _other=None):
+        x = self.target_position
+
+        masked_bits, logits, hard_mask = self.masker(bits)
+        predicted_X = self.explainer_X(masked_bits)
+
+        loss_X = F.cross_entropy(predicted_X, utterance[:, x], reduction='none')
+        loss_supp = (loss_X.detach() * logits).mean()
+
+        regularisation_loss = (1.0 - self.masker.prob_mask_logits.sigmoid()).pow(2.0).sum()
+
+        loss = loss_X + loss_supp + self.l * regularisation_loss
+
+        acc_X = (predicted_X.argmax(dim=-1) == utterance[:, x]).float()
+        nnz_att = hard_mask.float().sum(dim=-1)
+
+        info = {'acc_X': acc_X, 'zeroes': nnz_att}
+        
         return loss.mean(), info
