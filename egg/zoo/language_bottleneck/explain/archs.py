@@ -32,7 +32,7 @@ class Masker(nn.Module):
         super().__init__()
         self.prob_mask_logits = torch.zeros(max_len).fill_(prior)
         if mask is not None:
-            assert len(mask) == max_len
+            assert len(mask) == max_len, f'{mask} {max_len}'
             for i, v in enumerate(mask):
                 if v == 'x': self.prob_mask_logits[i] = +100
 
