@@ -48,4 +48,4 @@ class EarlyStopperAccuracy(BaseEarlyStopper):
 
     def should_stop(self) -> bool:
         assert self.trainer.validation_data is not None, 'Validation data must be provided for early stooping to work'
-        return self.validation_stats[-1][1][self.field_name] > self.threshold
+        return self.validation_stats[-1][1][self.field_name] >= self.threshold
