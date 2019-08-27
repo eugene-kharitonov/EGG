@@ -143,7 +143,7 @@ def train_utterance_to_bits(opts, train_loader, test_loader):
     vocab_size = opts.vocab_size
     device = opts.device
 
-    source_mask = (''.join(['?'] * 9 + ['x'])) if not opts.source_mask else opts.source_mask
+    source_mask = (''.join(['?'] * (max_len - 1) + ['x'])) if not opts.source_mask else opts.source_mask
 
     for _ in range(max_len - 2):
         print('# starting with a mask', source_mask)
