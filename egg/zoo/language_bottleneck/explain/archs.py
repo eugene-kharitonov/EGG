@@ -121,7 +121,7 @@ class Game(nn.Module):
         self.target_position = bit_x
 
     def forward(self, sequence, labels, _other=None):
-        bit_x = self.bit_x
+        bit_x = self.target_position
 
         masked_sequence, logits, hard_mask = self.masker(sequence)
         predicted_Y = self.explainer_Y(masked_sequence)

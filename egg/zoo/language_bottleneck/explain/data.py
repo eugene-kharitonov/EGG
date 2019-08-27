@@ -19,8 +19,9 @@ def read_file(fname, prediction_mask, source_mask):
             line = line.split()
 
             inp = [int(x) for x in line[0]]
-            assert len(prediction_mask) == len(inp)
-            inp = [z for (z, m) in zip(inp, prediction_mask) if m == '?']
+            assert prediction_mask is None or len(prediction_mask) == len(inp)
+            if prediction_mask is not None:
+                inp = [z for (z, m) in zip(inp, prediction_mask) if m == '?']
             inp = torch.tensor(inp, dtype=torch.int64)
             inputs.append(inp)
 
@@ -51,7 +52,7 @@ def read_file(fname, prediction_mask, source_mask):
 
 
 class LangData:
-    def __init__(self, fname, prediction_mask, source_mask, scale_factor=1, transpose=False):
+    def __init__(self, fname, prediction_mask=None, source_mask=None, scale_factor=1, transpose=False):
         self.inputs, self.codes = read_file(fname, prediction_mask, source_mask)
 
         if transpose:
