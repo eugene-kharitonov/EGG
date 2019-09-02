@@ -11,7 +11,7 @@ import numpy as np
 
 import egg.core as core
 from egg.zoo.language_bottleneck.explain.data import LangData
-from egg.zoo.language_bottleneck.explain.archs import Explainer, ReverseExplainer, Masker, Game, ReverseGame, ReverseExplainer
+from egg.zoo.language_bottleneck.explain.archs import Explainer, ReverseExplainer, Masker, Game, ReverseGame, ReverseExplainer, DummyExplainer, MinimalCoverGame
 from egg.zoo.language_bottleneck.explain.illustrate import CallbackEvaluator
 
 
@@ -35,9 +35,9 @@ def get_params(params):
     parser.add_argument('--language', type=str, default='vocab8_language_1.txt')
     parser.add_argument('--preference_x', type=float, default=2)
 
-    #parser.add_argument('--n_bits', type=int, default=8)
     parser.add_argument('--target', type=int, default=0)
-    parser.add_argument('--reverse_game', action='store_true')
+    parser.add_argument('--mode', choices=['reverse_game', 'intersection_game', 
+                                           'minimal_support', 'information_gap'])
 
     args = core.init(arg_parser=parser, params=params)
     return args
@@ -75,11 +75,12 @@ def main(params):
 
     opts.max_len = language_opts['max_len']
     opts.n_bits = language_opts['n_bits']
+    opts.vocab_size = language_opts['vocab_size']
 
-    if opts.reverse_game:
-        assert 0 <= opts.target < opts.max_len
-    else:
-        assert 0 <= opts.target < opts.n_bits
+    #if opts.mode == 'reverse_game':
+    #    assert 0 <= opts.target < opts.max_len
+    #if opts.mode == 'intersection_game'else:
+    #    assert 0 <= opts.target < opts.n_bits
 
     prediction_mask = ''.join(['?'] * opts.n_bits) if opts.prediction_mask is None else opts.prediction_mask
     source_mask = (''.join(['?'] * (opts.max_len - 1) + ['x'])) if opts.source_mask is None else opts.source_mask
@@ -90,10 +91,14 @@ def main(params):
     test_loader = torch.utils.data.DataLoader(test_data, shuffle=False, batch_size=1)
 
 
-    if not opts.reverse_game:
+    if opts.mode == 'intersection_game':
         train_utterance_to_bits(opts, train_loader, test_loader)
-    else:
+    if opts.mode == 'reverse_game':
         explain_symbol(opts, train_loader, test_loader)
+    if opts.mode == 'minimal_support':
+        minimal_support(opts, train_loader, test_loader)
+    if opts.mode == 'information_gap':
+        information_gap(opts, train_loader, test_loader)
 
     core.close()
 
@@ -137,6 +142,45 @@ def explain_symbol(opts, train_loader, test_loader):
         prediction_mask = pruned_mask(probs, prediction_mask)
 
 
+def minimal_support(opts, train_loader, test_loader):
+    # early stoppiong on acc_X_mean
+    n_bits = opts.n_bits
+    max_len = opts.max_len
+    vocab_size = opts.vocab_size
+    print(vocab_size, max_len, n_bits)
+    device = opts.device
+
+    source_mask = (''.join(['?'] * (max_len - 1) + ['x'])) if not opts.source_mask else opts.source_mask
+
+    for _ in range(max_len - 2):
+        print('# starting with a mask', source_mask)
+        masker = Masker(replace_id=vocab_size, max_len=max_len, prior=opts.prior, mask=source_mask)
+        explainer = Explainer(vocab_size=vocab_size, max_len=max_len, n_bits=n_bits)
+        game = MinimalCoverGame(masker, explainer, opts.coeff)
+        stopper = core.EarlyStopperAccuracy(threshold=0.99, field_name="acc_X_mean")
+
+        optimizer = torch.optim.Adam(
+            [
+                dict(params=explainer.parameters(), lr=opts.lr_e),
+                dict(params=masker.parameters(), lr=opts.lr_m)
+            ])
+
+        callback = CallbackEvaluator(test_loader, device)
+
+        trainer = core.Trainer(
+            game=game, optimizer=optimizer,
+            train_data=train_loader, validation_data=test_loader,
+            callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=False), callback, stopper])
+
+        trainer.train(n_epochs=opts.n_epochs)
+
+        probs = masker.prob_mask_logits.detach().sigmoid()
+        source_mask = pruned_mask(probs, source_mask)
+
+        if stopper.validation_stats[-1][1]["acc_X_mean"] < 0.99:
+            print("# did not reach Acc 1.0, stopping")
+            break
+
 def train_utterance_to_bits(opts, train_loader, test_loader):
     n_bits = opts.n_bits
     max_len = opts.max_len
@@ -170,6 +214,48 @@ def train_utterance_to_bits(opts, train_loader, test_loader):
 
         probs = masker.prob_mask_logits.detach().sigmoid()
         source_mask = pruned_mask(probs, source_mask)
+
+
+def information_gap(opts, train_loader, test_loader):
+    from egg.zoo.language_bottleneck.intervention import mutual_info, entropy
+
+    def get_bit_utterance(i, j, loader):
+        x, y = [], []
+
+        for utterance, meaning in loader:
+            x.append(meaning[:, i])
+            y.append(utterance[:, j])
+
+        return torch.cat(x, dim=0), torch.cat(y, dim=0)
+
+
+    n_bits = opts.n_bits
+    max_len = opts.max_len
+    vocab_size = opts.vocab_size
+    device = opts.device
+
+    gaps = torch.zeros(max_len)
+    non_constant_positions = 0.0
+
+    for j in range(max_len):
+        symbol_mi = []
+        h_j = None
+        for i in range(n_bits):
+            x, y = get_bit_utterance(i, j, test_loader)
+            info =  mutual_info(x, y)
+            symbol_mi.append(info)
+            
+            if h_j is None:
+                h_j = entropy(y)
+
+        symbol_mi.sort(reverse=True)
+
+        if h_j > 0.0:
+            gaps[j] = (symbol_mi[0] - symbol_mi[1]) / h_j
+            non_constant_positions += 1
+
+    score = gaps.sum() / non_constant_positions
+    print(score.item())
 
 if __name__ == "__main__":
     import sys
