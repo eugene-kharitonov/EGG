@@ -65,7 +65,10 @@ class CallbackEvaluator(core.Callback):
             #    print(substr, '->', predicted, 'correct: ', correct, '/', total)
 
         probs = F.sigmoid(game.masker.prob_mask_logits).detach().tolist()
-        bit_x = game.target_position
+        if hasattr(game, 'bit_x'):
+            bit_x = game.target_position
+        else:
+            bit_x = -1
         mask = game.masker.pre_mask
 
         s = json.dumps({"mode": "info", "probs": probs, "bit_x": bit_x, 'mask': mask})

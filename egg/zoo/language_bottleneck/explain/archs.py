@@ -56,6 +56,16 @@ class Masker(nn.Module):
 
         return sequence, logits, hard_mask
 
+class DummyExplainer(nn.Module):
+    def __init__(self, vocab_size, max_len, n_bits):
+        super().__init__()
+        self.predicted = torch.zeros(n_bits)
+
+    def forward(self, sequence):
+        batch_size = sequence.size(0)
+        output = self.predicted.unsqueeze(0).expand(batch_size, self.predicted.size(0))
+        return output
+
 
 class Explainer(nn.Module):
     def __init__(self, vocab_size, max_len, n_bits):
@@ -186,4 +196,39 @@ class ReverseGame(nn.Module):
 
         info = {'acc_X': acc_X, 'zeroes': nnz_att}
         
+        return loss.mean(), info
+
+
+
+class MinimalCoverGame(nn.Module):
+    def __init__(self, masker, explainer_X, l):
+        super().__init__()
+
+        self.masker = masker
+        self.explainer_X = explainer_X
+        self.l = l
+
+    def forward(self, sequence, labels, _other=None):
+        masked_sequence, logits, hard_mask = self.masker(sequence)
+        predicted_X = self.explainer_X(masked_sequence)
+
+        loss_X = F.binary_cross_entropy(predicted_X, labels.float(), reduction='none').mean(dim=-1)
+        loss_supp = (loss_X.detach() * logits).mean()
+        regularisation_loss = (1.0 - self.masker.prob_mask_logits.sigmoid()).pow(2.0).sum()
+
+        loss = loss_X + loss_supp + self.l * regularisation_loss
+        acc_X = ((predicted_X > 0.5).long() == labels).float().mean(dim=-1)
+
+        nnz_att = hard_mask.float().sum(dim=-1)
+
+        info = {'acc_X_mean': acc_X, 'zeroes': nnz_att}
+        
+        for i in range(8):
+            key = f'adv_acc_{i}' 
+            if key not in info: info[key] = 0.0
+
+            acc_Y = ((predicted_X[:, i] > 0.5).view(-1).long() == labels[:, i]).float().mean(dim=0)
+            info[key] += acc_X
+
+
         return loss.mean(), info
