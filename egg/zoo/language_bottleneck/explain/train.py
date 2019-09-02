@@ -8,6 +8,7 @@ import argparse
 import torch.utils.data
 import torch.nn.functional as F
 import numpy as np
+import pathlib
 
 import egg.core as core
 from egg.zoo.language_bottleneck.explain.data import LangData
@@ -32,14 +33,20 @@ def get_params(params):
     #                    help="")
     parser.add_argument('--prediction_mask', type=str, default=None)
     parser.add_argument('--source_mask', type=str, default=None)
-    parser.add_argument('--language', type=str, default='vocab8_language_1.txt')
+
+    parser.add_argument('--language', type=str, action='append', default=None)
+    parser.add_argument('--languages', type=str, action='append', default=None)
+
     parser.add_argument('--preference_x', type=float, default=2)
+    parser.add_argument('--output', type=str, default=None)
 
     parser.add_argument('--target', type=int, default=0)
     parser.add_argument('--mode', choices=['reverse_game', 'intersection_game', 
                                            'minimal_support', 'information_gap'])
 
     args = core.init(arg_parser=parser, params=params)
+    assert args.output
+
     return args
 
 def pruned_mask(probs, old_mask):
@@ -65,41 +72,58 @@ def get_language_opts(path):
         h = json.loads(h)
     return h
 
+def iterate_dir(root):
+    root = pathlib.Path(root).absolute()
+    for fname in root.glob('*'):
+        yield fname
+
 def main(params):
     opts = get_params(params)
     device = opts.device
+    output = open(opts.output, 'w')
+
+    languages = []
+    if opts.languages:
+        for d in opts.languages:
+            languages.extend(list(pathlib.Path(d).absolute().glob('*')))
+
+    if opts.language:
+        languages.extend([pathlib.Path(p) for p in opts.language])
+
+    for language in languages:
+        language_opts = get_language_opts(language)
+
+        opts.max_len = language_opts['max_len']
+        opts.n_bits = language_opts['n_bits']
+        opts.vocab_size = language_opts['vocab_size']
+
+        prediction_mask = ''.join(['?'] * opts.n_bits) if opts.prediction_mask is None else opts.prediction_mask
+        source_mask = (''.join(['?'] * (opts.max_len - 1) + ['x'])) if opts.source_mask is None else opts.source_mask
+
+        train_data = LangData(language, scale_factor=100, transpose=True, prediction_mask=prediction_mask, source_mask=source_mask)
+        train_loader = torch.utils.data.DataLoader(train_data, shuffle=True, batch_size=opts.batch_size)
+        test_data = LangData(language, scale_factor=1, transpose=True, prediction_mask=prediction_mask, source_mask=source_mask)
+        test_loader = torch.utils.data.DataLoader(test_data, shuffle=False, batch_size=1)
 
 
-    language_opts = get_language_opts(opts.language)
-    print(language_opts)
+        if opts.mode == 'intersection_game':
+            train_utterance_to_bits(opts, train_loader, test_loader)
+        if opts.mode == 'reverse_game':
+            explain_symbol(opts, train_loader, test_loader)
+        if opts.mode == 'minimal_support':
+            minimal_support(opts, train_loader, test_loader)
+        if opts.mode == 'information_gap':
+            result = information_gap(opts, train_loader, test_loader)
 
-    opts.max_len = language_opts['max_len']
-    opts.n_bits = language_opts['n_bits']
-    opts.vocab_size = language_opts['vocab_size']
+        for k, v in result.items():
+            language_opts[k] = v
+        language_opts['name'] = language.stem
+        language_opts = json.dumps(language_opts)
 
-    #if opts.mode == 'reverse_game':
-    #    assert 0 <= opts.target < opts.max_len
-    #if opts.mode == 'intersection_game'else:
-    #    assert 0 <= opts.target < opts.n_bits
+        output.write(language_opts)
+        output.write('\n')
 
-    prediction_mask = ''.join(['?'] * opts.n_bits) if opts.prediction_mask is None else opts.prediction_mask
-    source_mask = (''.join(['?'] * (opts.max_len - 1) + ['x'])) if opts.source_mask is None else opts.source_mask
-
-    train_data = LangData(opts.language, scale_factor=100, transpose=True, prediction_mask=prediction_mask, source_mask=source_mask)
-    train_loader = torch.utils.data.DataLoader(train_data, shuffle=True, batch_size=opts.batch_size)
-    test_data = LangData(opts.language, scale_factor=1, transpose=True, prediction_mask=prediction_mask, source_mask=source_mask)
-    test_loader = torch.utils.data.DataLoader(test_data, shuffle=False, batch_size=1)
-
-
-    if opts.mode == 'intersection_game':
-        train_utterance_to_bits(opts, train_loader, test_loader)
-    if opts.mode == 'reverse_game':
-        explain_symbol(opts, train_loader, test_loader)
-    if opts.mode == 'minimal_support':
-        minimal_support(opts, train_loader, test_loader)
-    if opts.mode == 'information_gap':
-        information_gap(opts, train_loader, test_loader)
-
+    output.close()
     core.close()
 
 
@@ -255,7 +279,10 @@ def information_gap(opts, train_loader, test_loader):
             non_constant_positions += 1
 
     score = gaps.sum() / non_constant_positions
-    print(score.item())
+
+    return dict(
+        mean_information_gap=score.item()
+    )
 
 if __name__ == "__main__":
     import sys
