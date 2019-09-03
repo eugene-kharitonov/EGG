@@ -12,9 +12,11 @@ import pathlib
 
 import egg.core as core
 from egg.zoo.language_bottleneck.explain.data import LangData
-from egg.zoo.language_bottleneck.explain.archs import Explainer, ReverseExplainer, Masker, Game, ReverseGame, ReverseExplainer, DummyExplainer, MinimalCoverGame
+from egg.zoo.language_bottleneck.explain.archs import Explainer, Masker, Game, ReverseGame
+from egg.zoo.language_bottleneck.explain.archs import GsMinimalCoverGame
 from egg.zoo.language_bottleneck.explain.illustrate import CallbackEvaluator
 
+from egg.zoo.language_bottleneck.intervention import mutual_info, entropy
 
 def get_params(params):
     print(params)
@@ -41,7 +43,7 @@ def get_params(params):
     parser.add_argument('--output', type=str, default=None)
 
     parser.add_argument('--target', type=int, default=0)
-    parser.add_argument('--mode', choices=['reverse_game', 'intersection_game', 
+    parser.add_argument('--mode', choices=['explain_symbol', 'intersection_game', 
                                            'minimal_support', 'information_gap'])
 
     args = core.init(arg_parser=parser, params=params)
@@ -108,12 +110,17 @@ def main(params):
 
         if opts.mode == 'intersection_game':
             train_utterance_to_bits(opts, train_loader, test_loader)
-        if opts.mode == 'reverse_game':
-            explain_symbol(opts, train_loader, test_loader)
+        if opts.mode == 'explain_symbol':
+            try:
+                result = quick_explain_symbol(opts, train_loader, test_loader)
+            except:
+                result = explain_symbol(opts, train_loader, test_loader)
         if opts.mode == 'minimal_support':
-            minimal_support(opts, train_loader, test_loader)
+            result = minimal_support(opts, train_loader, test_loader)
         if opts.mode == 'information_gap':
             result = information_gap(opts, train_loader, test_loader)
+
+        print(result)
 
         for k, v in result.items():
             language_opts[k] = v
@@ -127,67 +134,117 @@ def main(params):
     core.close()
 
 
-def explain_symbol(opts, train_loader, test_loader):
-    # TODO: predict all at once?
-    # TODO: Gumbel everywhere?
+def quick_explain_symbol(opts, train_loader, test_loader):
+
+    def get_bit_utterance(mask_bits, tgt, loader):
+        x, y = [], []
+        ind = [i for i, m in enumerate(mask_bits) if m == '?']
+
+        for utterance, meaning in loader:
+            x.append(meaning[:, ind])
+            y.append(utterance[:, tgt])
+        return torch.cat(x, dim=0), torch.cat(y, dim=0)
 
     n_bits = opts.n_bits
     max_len = opts.max_len
     vocab_size = opts.vocab_size
     device = opts.device
-    prediction_mask = ''.join(['?'] * n_bits)
 
-    for _ in range(n_bits + 1):
-        print('# starting with a mask', prediction_mask)
-        masker = Masker(replace_id=0, max_len=n_bits, prior=opts.prior, mask=prediction_mask)
-        explainer = ReverseExplainer(vocab_size=vocab_size, n_bits=n_bits)
-        game = ReverseGame(masker, explainer, opts.target, opts.coeff)
-        stopper = core.EarlyStopperAccuracy(threshold=1.0, field_name="acc_X")
+    for target in range(max_len - 1):
+        for b in range(n_bits):
+            prediction_mask = ['?'] * n_bits
+            prediction_mask[b] = 'x'
+            prediction_mask = ''.join(prediction_mask)
 
-        optimizer = torch.optim.Adam(
-            [
-                dict(params=explainer.parameters(), lr=opts.lr_e),
-                dict(params=masker.parameters(), lr=opts.lr_m)
-            ])
+            meaning, utt = get_bit_utterance(prediction_mask, target, test_loader)
+            symbol_entr = entropy(utt)
+            meaning_utt_info = mutual_info(meaning, utt)
+            print(f'# symbol entropy {symbol_entr}, info {meaning_utt_info}')
+            if meaning_utt_info / symbol_entr >= 0.99:
+                raise ValueError()
+                #assert False, "Actually position {target} does not need bit {b}"
 
-        callback = CallbackEvaluator(test_loader, device)
+    return {'ave_bits_needed': n_bits}
 
-        trainer = core.Trainer(
-            game=game, optimizer=optimizer,
-            train_data=train_loader, validation_data=test_loader,
-            callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), callback, stopper])
+def explain_symbol(opts, train_loader, test_loader):
+    def get_bit_utterance(mask_bits, tgt, loader):
+        x, y = [], []
+        ind = [i for i, m in enumerate(mask_bits) if m == '?']
 
-        trainer.train(n_epochs=opts.n_epochs)
-        if stopper.validation_stats[-1][1]["acc_X"] < 0.99:
-            print("# did not reach Acc 1.0, stopping")
-            break
+        for utterance, meaning in loader:
+            x.append(meaning[:, ind])
+            y.append(utterance[:, tgt])
+        return torch.cat(x, dim=0), torch.cat(y, dim=0)
 
-        probs = masker.prob_mask_logits.detach().sigmoid()
-        prediction_mask = pruned_mask(probs, prediction_mask)
+    n_bits = opts.n_bits
+    max_len = opts.max_len
+    vocab_size = opts.vocab_size
+    device = opts.device
+    bits_required = 0
+
+    for target in range(max_len - 1):
+        prediction_mask = ''.join(['?'] * n_bits)
+        for b in range(n_bits):
+            print('# starting with a mask', prediction_mask)
+            meaning, utt = get_bit_utterance(prediction_mask, target, test_loader)
+            symbol_entr = entropy(utt)
+            meaning_utt_info = mutual_info(meaning, utt)
+            print(f'# symbol entropy {symbol_entr}, info {meaning_utt_info}')
+            if meaning_utt_info / symbol_entr < 0.99:
+                break
+
+            game = ReverseGame(target_position=target, n_bits=n_bits, vocab_size=vocab_size, mask=prediction_mask, prior=opts.prior, l=opts.coeff)
+            stopper = core.EarlyStopperAccuracy(threshold=0.99, field_name="acc_X")
+
+            optimizer = torch.optim.Adam(game.parameters(), opts.lr)
+            callback = CallbackEvaluator(test_loader, device)
+
+            trainer = core.Trainer(
+                game=game, optimizer=optimizer,
+                train_data=train_loader, validation_data=test_loader,
+                callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), callback, stopper])
+
+            trainer.train(n_epochs=opts.n_epochs)
+
+            probs = game.masker.prob_mask_logits.detach().sigmoid()
+            prediction_mask = pruned_mask(probs, prediction_mask)
+        bits_required += n_bits - b + 1
+
+    return {'ave_bits_needed': bits_required / (max_len - 1)}
 
 
 def minimal_support(opts, train_loader, test_loader):
-    # early stoppiong on acc_X_mean
+
+    def get_bit_utterance(mask_utt, loader):
+        x, y = [], []
+        ind = [i for i, m in enumerate(mask_utt) if m == '?']
+
+        for utterance, meaning in loader:
+            x.append(meaning)
+            y.append(utterance[:, ind])
+        return torch.cat(x, dim=0), torch.cat(y, dim=0)
+
     n_bits = opts.n_bits
     max_len = opts.max_len
     vocab_size = opts.vocab_size
-    print(vocab_size, max_len, n_bits)
     device = opts.device
 
     source_mask = (''.join(['?'] * (max_len - 1) + ['x'])) if not opts.source_mask else opts.source_mask
+    prev_mask = source_mask
 
-    for _ in range(max_len - 2):
+    for r in range(max_len - 2):
         print('# starting with a mask', source_mask)
-        masker = Masker(replace_id=vocab_size, max_len=max_len, prior=opts.prior, mask=source_mask)
-        explainer = Explainer(vocab_size=vocab_size, max_len=max_len, n_bits=n_bits)
-        game = MinimalCoverGame(masker, explainer, opts.coeff)
+        meaning, utt = get_bit_utterance(source_mask, test_loader)
+        meaning_entr = entropy(meaning)
+        meaning_utt_info = mutual_info(meaning, utt)
+        print(f'# meaning entropy {meaning_entr}, info {meaning_utt_info}')
+        if meaning_utt_info / meaning_entr < 0.99:
+            break
+
+        game = GsMinimalCoverGame(vocab_size, max_len, n_bits, opts.coeff)
         stopper = core.EarlyStopperAccuracy(threshold=0.99, field_name="acc_X_mean")
 
-        optimizer = torch.optim.Adam(
-            [
-                dict(params=explainer.parameters(), lr=opts.lr_e),
-                dict(params=masker.parameters(), lr=opts.lr_m)
-            ])
+        optimizer = torch.optim.Adam(game.parameters())
 
         callback = CallbackEvaluator(test_loader, device)
 
@@ -198,12 +255,17 @@ def minimal_support(opts, train_loader, test_loader):
 
         trainer.train(n_epochs=opts.n_epochs)
 
-        probs = masker.prob_mask_logits.detach().sigmoid()
+        probs = game.masker.prob_mask_logits.detach().sigmoid()
+        prev_mask = source_mask
         source_mask = pruned_mask(probs, source_mask)
 
-        if stopper.validation_stats[-1][1]["acc_X_mean"] < 0.99:
-            print("# did not reach Acc 1.0, stopping")
-            break
+    table = {'x': '?', '?': 'x'}
+    prev_mask_inverse = ''.join([table[x] for x in prev_mask])
+
+    meaning, utt = get_bit_utterance(prev_mask_inverse, test_loader)
+    reverse_info = mutual_info(meaning, utt)
+
+    return {'min_positions': r, 'meaning_utt_info': meaning_utt_info, 'mask': source_mask, 'reverse_info': reverse_info}
 
 def train_utterance_to_bits(opts, train_loader, test_loader):
     n_bits = opts.n_bits
@@ -241,7 +303,6 @@ def train_utterance_to_bits(opts, train_loader, test_loader):
 
 
 def information_gap(opts, train_loader, test_loader):
-    from egg.zoo.language_bottleneck.intervention import mutual_info, entropy
 
     def get_bit_utterance(i, j, loader):
         x, y = [], []
