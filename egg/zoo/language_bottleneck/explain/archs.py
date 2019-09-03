@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Bernoulli
+from torch.distributions.relaxed_bernoulli import LogitRelaxedBernoulli
 
 import egg.core as core
 
@@ -26,6 +27,32 @@ def grad_reverse(x, lambd):
     return GradReverse.apply(x, lambd)
 
 """
+
+class GsMasker(nn.Module):
+    def __init__(self, max_len, prior=0.0, mask=None, temperature=1.0):
+        super().__init__()
+
+        self.prob_mask_logits = torch.zeros(max_len).fill_(prior)
+        if mask is not None:
+            assert len(mask) == max_len, f'{mask} {max_len}'
+            for i, v in enumerate(mask):
+                if v == 'x': self.prob_mask_logits[i] = +100
+        self.prob_mask_logits = torch.nn.Parameter(self.prob_mask_logits)
+        self.temperature = temperature
+        self.pre_mask = mask
+
+    def forward(self, sequence):
+        batch_size = sequence.size(0)
+        extended_logits = self.prob_mask_logits.unsqueeze(0).expand((batch_size, sequence.size(1)))
+
+        mask = LogitRelaxedBernoulli(logits=extended_logits, temperature=self.temperature).rsample()
+        if self.training:
+            mask = mask.softmax(dim=-1)
+        else:
+            mask = torch.zeros_like(mask).scatter_(-1, mask.argmax(dim=-1, keepdim=True), 1.0)
+
+        return mask
+
 
 class Masker(nn.Module):
     def __init__(self, replace_id, max_len, prior=0.0, mask=None):
@@ -56,16 +83,41 @@ class Masker(nn.Module):
 
         return sequence, logits, hard_mask
 
-class DummyExplainer(nn.Module):
+
+class GsExplainer(nn.Module):
     def __init__(self, vocab_size, max_len, n_bits):
         super().__init__()
-        self.predicted = torch.zeros(n_bits)
+
+        self.encoder = core.TransformerBaseEncoder(vocab_size=vocab_size + 2, 
+                max_len=max_len + 1, 
+                embed_dim=32, num_heads=4,
+                hidden_size=64, num_layers=3)
+
+        self.predictor = nn.Linear(32, n_bits)
+
+        self.sos_id = torch.tensor([vocab_size]).long()
 
     def forward(self, sequence):
         batch_size = sequence.size(0)
-        output = self.predicted.unsqueeze(0).expand(batch_size, self.predicted.size(0))
-        return output
+        lengths = core.find_lengths(sequence)
 
+        prefix = self.sos_id.to(sequence.device).unsqueeze(0).expand((batch_size, 1))
+        sequence = torch.cat([prefix, sequence], dim=1)
+        lengths = lengths + 1
+
+        max_len = sequence.size(1)
+        len_indicators = torch.arange(max_len).expand((batch_size, max_len)).to(lengths.device)
+        lengths_expanded = lengths.unsqueeze(1)
+
+        padding_mask = len_indicators >= lengths_expanded
+
+        transformed = self.encoder(sequence, padding_mask)
+        transformed = transformed[:, 0, :]
+
+        predicted = self.predictor(transformed)
+        predicted = predicted.sigmoid()
+        
+        return predicted
 
 class Explainer(nn.Module):
     def __init__(self, vocab_size, max_len, n_bits):
@@ -102,21 +154,6 @@ class Explainer(nn.Module):
         
         return predicted
 
-class ReverseExplainer(nn.Module):
-    def __init__(self, vocab_size, n_bits):
-        super().__init__()
-
-        self.predictor = nn.Sequential(
-            nn.Linear(n_bits, 128),
-            nn.LeakyReLU(),
-            nn.Linear(128, 128),
-            nn.LeakyReLU(),
-            nn.Linear(128, vocab_size),
-        )
-
-    def forward(self, bits):
-        x = self.predictor(bits.float())
-        return x
 
 class Game(nn.Module):
     def __init__(self, masker, explainer_X, explainer_Y, bit_x, l, preference_x):
@@ -169,66 +206,87 @@ class Game(nn.Module):
 
 
 class ReverseGame(nn.Module):
-    def __init__(self, masker, explainer_X, target_position, l):
+    def __init__(self, target_position, n_bits, vocab_size, mask=None, prior=0.0, l=1e-2):
         super().__init__()
 
-        self.masker = masker
-        self.explainer_X = explainer_X
+        self.masker = GsMasker(n_bits, prior=prior, mask=mask)
+        self.explainer = nn.Sequential(
+            nn.Linear(n_bits, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, vocab_size),
+        )
 
         self.l = l
         self.target_position = target_position
 
     def forward(self, utterance, bits, _other=None):
+        bits = bits.float()
         x = self.target_position
+        mask = self.masker(bits)
 
-        masked_bits, logits, hard_mask = self.masker(bits)
-        predicted_X = self.explainer_X(masked_bits)
+        bits = (1.0 - mask) * bits
+        predicted_X = self.explainer(bits)
 
         loss_X = F.cross_entropy(predicted_X, utterance[:, x], reduction='none')
-        loss_supp = (loss_X.detach() * logits).mean()
-
         regularisation_loss = (1.0 - self.masker.prob_mask_logits.sigmoid()).pow(2.0).sum()
 
-        loss = loss_X + loss_supp + self.l * regularisation_loss
+        loss = loss_X + self.l * regularisation_loss
 
         acc_X = (predicted_X.argmax(dim=-1) == utterance[:, x]).float()
-        nnz_att = hard_mask.float().sum(dim=-1)
+        nnz_att = mask.float().sum(dim=-1)
 
         info = {'acc_X': acc_X, 'zeroes': nnz_att}
         
         return loss.mean(), info
 
 
-
-class MinimalCoverGame(nn.Module):
-    def __init__(self, masker, explainer_X, l):
+class GsMinimalCoverGame(nn.Module):
+    def __init__(self, vocab_size, max_len, n_bits, l):
         super().__init__()
 
-        self.masker = masker
-        self.explainer_X = explainer_X
+        self.masker = GsMasker(max_len)
+        self.cell = nn.LSTM(input_size=32, batch_first=True,
+                               hidden_size=128, num_layers=1)
+        self.embedding = nn.Embedding(vocab_size, 32, padding_idx=0)
+
+        self.mask_embedding = nn.Parameter(torch.zeros(32))
+        nn.init.normal_(self.mask_embedding)
+
+        self.fc = nn.Linear(128, n_bits)
         self.l = l
 
     def forward(self, sequence, labels, _other=None):
-        masked_sequence, logits, hard_mask = self.masker(sequence)
-        predicted_X = self.explainer_X(masked_sequence)
+        embedded = self.embedding(sequence)
+        batch_size, seq_len, emb_dim = embedded.size()
 
-        loss_X = F.binary_cross_entropy(predicted_X, labels.float(), reduction='none').mean(dim=-1)
-        loss_supp = (loss_X.detach() * logits).mean()
+        mask = self.masker(sequence)
+        mask = mask.unsqueeze(2).expand(batch_size, seq_len, emb_dim)
+
+        shaped_mask_embedding = self.mask_embedding.unsqueeze(0).unsqueeze(0).expand_as(mask)
+
+        embedded = (1.0 - mask) * embedded + mask * shaped_mask_embedding
+        _, (hidden, _) = self.cell(embedded)
+
+        predicted_X = self.fc(hidden[-1])
+
+        loss_X = F.binary_cross_entropy(predicted_X.sigmoid(), labels.float())
         regularisation_loss = (1.0 - self.masker.prob_mask_logits.sigmoid()).pow(2.0).sum()
 
-        loss = loss_X + loss_supp + self.l * regularisation_loss
+        loss = loss_X + self.l * regularisation_loss
         acc_X = ((predicted_X > 0.5).long() == labels).float().mean(dim=-1)
 
-        nnz_att = hard_mask.float().sum(dim=-1)
+        zeros = mask.float().sum(dim=-1).sum(dim=-1)
 
-        info = {'acc_X_mean': acc_X, 'zeroes': nnz_att}
+        info = {'acc_X_mean': acc_X, 'zeroes': zeros}
         
         for i in range(8):
             key = f'adv_acc_{i}' 
             if key not in info: info[key] = 0.0
 
             acc_Y = ((predicted_X[:, i] > 0.5).view(-1).long() == labels[:, i]).float().mean(dim=0)
-            info[key] += acc_X
+            info[key] += acc_Y
 
 
         return loss.mean(), info
