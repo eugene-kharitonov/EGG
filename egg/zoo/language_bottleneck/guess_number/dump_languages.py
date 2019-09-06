@@ -37,7 +37,7 @@ def was_success(path):
     return False
 
 def build_models(opts, job_id):
-    from egg.zoo.language_bottleneck.guess_number.archs import Sender, Receiver, ReinforcedReceiver
+    from egg.zoo.language_bottleneck.guess_number.archs import Sender, Receiver, ReinforcedReceiver, FactorizedSender, Discriminator
     from egg.zoo.language_bottleneck.guess_number.features import UniformLoader, OneHotLoader
 
     device = 'cuda'
@@ -47,7 +47,7 @@ def build_models(opts, job_id):
     test_loader.batch = [x.to(device) for x in test_loader.batch]
     assert opts.variable_length and opts.mode == 'rf'
 
-    if opts.sender_cell == 'transformer':
+    """if opts.sender_cell == 'transformer':
         receiver = Receiver(n_bits=opts.n_bits, n_hidden=opts.receiver_hidden)
         sender = Sender(n_bits=opts.n_bits, n_hidden=opts.sender_hidden,
                         vocab_size=opts.sender_hidden)  # TODO: not really vocab
@@ -59,6 +59,28 @@ def build_models(opts, job_id):
                         vocab_size=opts.sender_hidden)  # TODO: not really vocab
         sender = core.RnnSenderReinforce(agent=sender, vocab_size=opts.vocab_size, 
                                     embed_dim=opts.sender_emb, hidden_size=opts.sender_hidden, max_len=opts.max_len, force_eos=True, cell=opts.sender_cell)
+    """
+
+    discriminator = Discriminator(opts.vocab_size, n_hidden=64, embed_dim=64)
+
+    if opts.sender_cell == 'transformer':
+        receiver = Receiver(n_bits=opts.n_bits, n_hidden=opts.receiver_hidden)
+        sender = Sender(n_bits=opts.n_bits, n_hidden=opts.sender_hidden,
+                        vocab_size=opts.sender_hidden)  # TODO: not really vocab
+        sender = core.TransformerSenderReinforce(agent=sender, vocab_size=opts.vocab_size, embed_dim=opts.sender_emb, max_len=opts.max_len,
+                                                 num_layers=1, num_heads=1, hidden_size=opts.sender_hidden)
+    elif opts.sender_cell in ['lstm', 'rnn', 'gru']:
+        receiver = Receiver(n_bits=opts.n_bits, n_hidden=opts.receiver_hidden)
+        sender = Sender(n_bits=opts.n_bits, n_hidden=opts.sender_hidden,
+                        vocab_size=opts.sender_hidden)  # TODO: not really vocab
+        sender = core.RnnSenderReinforce(agent=sender, vocab_size=opts.vocab_size, 
+                                  embed_dim=opts.sender_emb, hidden_size=opts.sender_hidden, max_len=opts.max_len, force_eos=True, cell=opts.sender_cell)
+    elif opts.sender_cell == 'factorized':
+        receiver = Receiver(n_bits=opts.n_bits, n_hidden=opts.receiver_hidden)
+        sender = FactorizedSender(max_len=opts.max_len, n_bits=opts.n_bits, n_hidden=opts.sender_hidden,
+                        vocab_size=opts.vocab_size)
+
+
 
     if opts.receiver_cell == 'transformer':
         receiver = Receiver(n_bits=opts.n_bits, n_hidden=opts.receiver_emb)
@@ -70,7 +92,8 @@ def build_models(opts, job_id):
             receiver, opts.vocab_size, opts.receiver_emb, opts.receiver_hidden, cell=opts.receiver_cell)
 
     game = core.SenderReceiverRnnReinforce(
-            sender, receiver, None, sender_entropy_coeff=opts.sender_entropy_coeff, receiver_entropy_coeff=opts.receiver_entropy_coeff)
+            sender, receiver, None, sender_entropy_coeff=opts.sender_entropy_coeff, receiver_entropy_coeff=opts.receiver_entropy_coeff, \
+                    discriminator=discriminator)
 
     optimizer = torch.optim.Adam(
         [

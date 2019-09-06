@@ -17,6 +17,17 @@ from .rnn import RnnEncoder
 from .util import find_lengths
 
 
+def _permute_dims(latent_sample):
+    perm = torch.zeros_like(latent_sample)
+    batch_size, dim_z = perm.size()
+
+    for z in range(dim_z):
+        pi = torch.randperm(batch_size).to(latent_sample.device)
+        perm[:, z] = latent_sample[pi, z]
+
+    return perm
+
+
 class ReinforceWrapper(nn.Module):
     """
     Reinforce Wrapper for an agent. Assumes that the during the forward,
@@ -306,7 +317,6 @@ class RnnReceiverDeterministic(nn.Module):
 
         return agent_output, logits, entropy
 
-
 class SenderReceiverRnnReinforce(nn.Module):
     """
     Implements Sender/Receiver game with training done via Reinforce. Both agents are supposed to
@@ -341,7 +351,7 @@ class SenderReceiverRnnReinforce(nn.Module):
     5.0
     """
     def __init__(self, sender, receiver, loss, sender_entropy_coeff, receiver_entropy_coeff,
-                 length_cost=0.0):
+                 length_cost=0.0, discriminator=None, discriminator_weight=0.0):
         """
         :param sender: sender agent
         :param receiver: receiver agent
@@ -370,7 +380,12 @@ class SenderReceiverRnnReinforce(nn.Module):
         self.mean_baseline = defaultdict(float)
         self.n_points = defaultdict(float)
 
+        self.discriminator = discriminator
+        self.discriminator_weight = discriminator_weight
+
     def forward(self, sender_input, labels, receiver_input=None):
+        device = sender_input.device
+
         message, log_prob_s, entropy_s = self.sender(sender_input)
         message_lengths = find_lengths(message)
         receiver_output, log_prob_r, entropy_r = self.receiver(message, receiver_input, message_lengths)
@@ -400,13 +415,38 @@ class SenderReceiverRnnReinforce(nn.Module):
         policy_length_loss = ((length_loss.float() - self.mean_baseline['length']) * effective_log_prob_s).mean()
         policy_loss = ((loss.detach() - self.mean_baseline['loss']) * log_prob).mean()
 
-        optimized_loss = policy_length_loss + policy_loss - weighted_entropy
+        policy_discriminator_loss = 0.0
+        discriminator_loss = 0.0
+        if self.discriminator is not None:
+            with torch.no_grad():
+                p_grammatical = self.discriminator(message).log_softmax(dim=-1)
+                discriminator_loss = p_grammatical[:, 0] - p_grammatical[:, 1]
+            policy_discriminator_loss = ((discriminator_loss.detach() - self.mean_baseline['discriminator_loss']) * log_prob_s.sum(dim=-1)).mean()
+
+        discriminator_train_loss = 0.0
+        if self.discriminator is not None:
+            positive_examples = message
+            negative_examples = _permute_dims(message)
+            examples = torch.cat([positive_examples, negative_examples])
+            batch_size = message.size(0)
+            labels = torch.zeros(2 * batch_size, device=device).long()
+
+            labels[:batch_size] = 1
+
+            discriminator_predictions = self.discriminator(examples)
+            discriminator_train_loss = F.cross_entropy(discriminator_predictions, labels)
+
+            discriminator_train_acc = (discriminator_predictions.argmax(dim=-1) == labels).float().mean().item()
+
+        optimized_loss = policy_length_loss + policy_loss - weighted_entropy - self.discriminator_weight * policy_discriminator_loss
         # if the receiver is deterministic/differentiable, we apply the actual loss
-        optimized_loss += loss.mean()
+        optimized_loss += loss.mean() + discriminator_train_loss
 
         if self.training:
             self.update_baseline('loss', loss)
             self.update_baseline('length', length_loss)
+            if self.discriminator:
+                self.update_baseline('discriminator_loss', discriminator_loss)
 
         for k, v in rest.items():
             rest[k] = v.mean().item() if hasattr(v, 'mean') else v
@@ -415,6 +455,10 @@ class SenderReceiverRnnReinforce(nn.Module):
         rest['receiver_entropy'] = entropy_r.mean().item()
         rest['original_loss'] = loss.mean().item()
         rest['mean_length'] = message_lengths.float().mean().item()
+        if self.discriminator:
+            rest['discriminator_loss'] = discriminator_loss.detach().mean().item()
+            rest['discriminator_train_loss'] = discriminator_train_loss.detach().mean().item()
+            rest['discriminator_train_acc'] = discriminator_train_acc
 
         return optimized_loss, rest
 

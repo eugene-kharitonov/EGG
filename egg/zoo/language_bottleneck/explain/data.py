@@ -29,6 +29,9 @@ def read_file(fname, prediction_mask, source_mask):
             codes.append(code)
 
     max_code_len = max(len(x) for x in codes)
+    if source_mask:
+        max_code_len = max(max_code_len, len(source_mask))
+
     average_len = sum(len(x) for x in codes) / len(codes)
     print(f'# Max length is {max_code_len}, average code length is {average_len}')
     expanded_codes = []
@@ -40,7 +43,7 @@ def read_file(fname, prediction_mask, source_mask):
         assert len(code) == max_code_len
 
         if source_mask:
-            assert len(code) == len(source_mask), f'{len(code)} {len(source_mask)}'
+            assert len(code) == len(source_mask), f'{len(code)} {len(source_mask)} {fname}'
             for i, s in enumerate(source_mask):
                 if s == 'x':
                     code[i] = 1
@@ -70,6 +73,17 @@ class LangData:
 
 
 if __name__ == '__main__':
-    data = LangData('vocab8_language_1.txt', prediction_mask='xxxxxxx?')
-    for b in torch.utils.data.DataLoader(data, shuffle=False, batch_size=2):
-        print(b)
+    data = LangData('./../guess_number/factorized_discr/17406329_0')#, source_mask='xxxxx?xxx?xx????????x')
+    for meaning, code in torch.utils.data.DataLoader(data, shuffle=False, batch_size=256):
+        pass
+
+    source_mask='xxxxx?xxx?xx????????x'
+    mask = []
+    for i in range(code.size(1)):
+        if (code[:, i] == code[0, i]).all() or source_mask[i] == 'x':
+            pass
+        else:
+            mask.append(i)
+    
+    for i in range(meaning.size(0)):
+        print(meaning[i, :], code[i, mask])

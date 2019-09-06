@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Bernoulli
+from torch.distributions import Categorical
 
 import egg.core as core
 
@@ -72,3 +73,69 @@ class Sender(nn.Module):
 
         return message
 
+
+class FactorizedSender(nn.Module):
+    def __init__(self, vocab_size, max_len, n_bits, n_hidden):
+        super().__init__()
+
+
+        # reserve one position for EOS
+        self.symbol_generators = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(n_bits, n_hidden),
+                nn.LeakyReLU(),
+                nn.Linear(n_hidden, n_hidden),
+                nn.LeakyReLU(),
+                nn.Linear(n_hidden, vocab_size)
+            ) for _ in range(max_len - 1)
+        ])
+
+    def forward(self, bits):
+        sequence = []
+        log_probs = []
+        entropy = []
+
+        for generator in self.symbol_generators:
+            logits = generator(bits.float())
+
+            step_logits = F.log_softmax(logits, dim=-1)
+            distr = Categorical(logits=step_logits)
+            entropy.append(distr.entropy())
+
+            if self.training:
+                sample = distr.sample()
+            else:
+                sample = step_logits.argmax(dim=-1)
+
+            log_probs.append(distr.log_prob(sample))
+            sequence.append(sample)
+
+        zeros = torch.zeros(bits.size(0)).to(bits.device)
+
+        sequence.append(zeros.long())
+        sequence = torch.stack(sequence).permute(1, 0)
+
+        log_probs.append(zeros)
+        log_probs = torch.stack(log_probs).permute(1, 0)
+
+        entropy.append(zeros)
+        entropy = torch.stack(entropy).permute(1, 0)
+
+        return sequence, log_probs, entropy
+
+
+
+class Discriminator(nn.Module):
+    def __init__(self, vocab_size, n_hidden, embed_dim):
+        super().__init__()
+        self.encoder = core.RnnEncoder(vocab_size, embed_dim=embed_dim, n_hidden=n_hidden)
+        self.fc = nn.Linear(n_hidden, 2, bias=False)
+        #self.emb = nn.Embedding(embed_dim, n_hidden)
+
+    def forward(self, message):
+        x = self.encoder(message)
+        #x = self.fc(message[:, 0])
+        #x = self.emb(message[:, 0])
+        #x = F.leaky_relu(x)
+        x = self.fc(x)
+        return x

@@ -181,6 +181,7 @@ def explain_symbol(opts, train_loader, test_loader):
     vocab_size = opts.vocab_size
     device = opts.device
     bits_required = 0
+    normalizer = 0.0
 
     for target in range(max_len - 1):
         prediction_mask = ''.join(['?'] * n_bits)
@@ -190,7 +191,7 @@ def explain_symbol(opts, train_loader, test_loader):
             symbol_entr = entropy(utt)
             meaning_utt_info = mutual_info(meaning, utt)
             print(f'# symbol entropy {symbol_entr}, info {meaning_utt_info}')
-            if meaning_utt_info / symbol_entr < 0.99:
+            if symbol_entr == 0 or meaning_utt_info / symbol_entr < 0.99:
                 break
 
             game = ReverseGame(target_position=target, n_bits=n_bits, vocab_size=vocab_size, mask=prediction_mask, prior=opts.prior, l=opts.coeff)
@@ -208,9 +209,11 @@ def explain_symbol(opts, train_loader, test_loader):
 
             probs = game.masker.prob_mask_logits.detach().sigmoid()
             prediction_mask = pruned_mask(probs, prediction_mask)
-        bits_required += n_bits - b + 1
+        if symbol_entr > 0:
+            bits_required += n_bits - b + 1
+            normalizer += 1
 
-    return {'ave_bits_needed': bits_required / (max_len - 1)}
+    return {'ave_bits_needed': bits_required / normalizer}
 
 
 def minimal_support(opts, train_loader, test_loader):
