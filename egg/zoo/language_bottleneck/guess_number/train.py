@@ -9,7 +9,7 @@ import torch.utils.data
 import torch.nn.functional as F
 import egg.core as core
 from egg.zoo.language_bottleneck.guess_number.features import OneHotLoader, UniformLoader
-from egg.zoo.language_bottleneck.guess_number.archs import Sender, Receiver, ReinforcedReceiver
+from egg.zoo.language_bottleneck.guess_number.archs import Sender, Receiver, ReinforcedReceiver, FactorizedSender, Discriminator
 
 from egg.zoo.language_bottleneck.intervention import CallbackEvaluator
 from egg.core import EarlyStopperAccuracy
@@ -58,6 +58,7 @@ def get_params(params):
                         help="Learning rate for Sender's parameters")
     parser.add_argument('--receiver_lr', type=float, default=None,
                         help="Learning rate for Receiver's parameters")
+    parser.add_argument('--discriminator_weight', type=float, default=0.0)
 
     parser.add_argument('--mode', type=str, default='gs',
                         help="Selects whether Reinforce or GumbelSoftmax relaxation is used for training {rf, gs,"
@@ -147,18 +148,24 @@ def main(params):
             print('Only mode=rf is supported atm')
             opts.mode = 'rf'
 
+        discriminator = Discriminator(opts.vocab_size, n_hidden=64, embed_dim=64)
+
         if opts.sender_cell == 'transformer':
             receiver = Receiver(n_bits=opts.n_bits, n_hidden=opts.receiver_hidden)
             sender = Sender(n_bits=opts.n_bits, n_hidden=opts.sender_hidden,
                             vocab_size=opts.sender_hidden)  # TODO: not really vocab
             sender = core.TransformerSenderReinforce(agent=sender, vocab_size=opts.vocab_size, embed_dim=opts.sender_emb, max_len=opts.max_len,
                                                      num_layers=1, num_heads=1, hidden_size=opts.sender_hidden)
-        else:
+        elif opts.sender_cell in ['lstm', 'rnn', 'gru']:
             receiver = Receiver(n_bits=opts.n_bits, n_hidden=opts.receiver_hidden)
             sender = Sender(n_bits=opts.n_bits, n_hidden=opts.sender_hidden,
                             vocab_size=opts.sender_hidden)  # TODO: not really vocab
             sender = core.RnnSenderReinforce(agent=sender, vocab_size=opts.vocab_size, 
                                       embed_dim=opts.sender_emb, hidden_size=opts.sender_hidden, max_len=opts.max_len, force_eos=True, cell=opts.sender_cell)
+        elif opts.sender_cell == 'factorized':
+            receiver = Receiver(n_bits=opts.n_bits, n_hidden=opts.receiver_hidden)
+            sender = FactorizedSender(max_len=opts.max_len, n_bits=opts.n_bits, n_hidden=opts.sender_hidden,
+                            vocab_size=opts.vocab_size)
 
         if opts.receiver_cell == 'transformer':
             receiver = Receiver(n_bits=opts.n_bits, n_hidden=opts.receiver_emb)
@@ -168,11 +175,10 @@ def main(params):
             receiver = Receiver(n_bits=opts.n_bits, n_hidden=opts.receiver_hidden)
             receiver = core.RnnReceiverDeterministic(
                 receiver, opts.vocab_size, opts.receiver_emb, opts.receiver_hidden, cell=opts.receiver_cell)
-
-            game = core.SenderReceiverRnnGS(sender, receiver, diff_loss)
        
         game = core.SenderReceiverRnnReinforce(
-                sender, receiver, diff_loss, sender_entropy_coeff=opts.sender_entropy_coeff, receiver_entropy_coeff=opts.receiver_entropy_coeff)
+                sender, receiver, diff_loss, sender_entropy_coeff=opts.sender_entropy_coeff, receiver_entropy_coeff=opts.receiver_entropy_coeff,
+                discriminator=discriminator, discriminator_weight=opts.discriminator_weight)
 
     optimizer = torch.optim.Adam(
         [
@@ -189,7 +195,7 @@ def main(params):
         game=game, optimizer=optimizer,
         train_data=train_loader,
         validation_data=test_loader,
-        callbacks=[core.ConsoleLogger(as_json=True), EarlyStopperAccuracy(opts.early_stopping_thr)])#, intervention])
+        callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), EarlyStopperAccuracy(opts.early_stopping_thr)])#, intervention])
 
     trainer.train(n_epochs=opts.n_epochs)
 
