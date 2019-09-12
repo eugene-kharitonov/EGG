@@ -145,6 +145,9 @@ class Game(nn.Module):
         self.memoryless_a = memoryless_a
         self.entropy_coeff = entropy_coeff
 
+        self.mean_baseline = 0.0
+        self.n_points = 0.0
+
     def do_rounds(self, batch, tasks):
         batch_size = batch.size(0)
         self.q_bot.reset()
@@ -191,7 +194,13 @@ class Game(nn.Module):
         first_match = (samples[:, 0] == labels[:, 0:1]).float()
         second_match = (samples[:, 1] == labels[:, 1:2]).float()
 
-        reward = first_match * second_match
-        loss = -(reward * logprobs).mean() - entropies.mean() * self.entropy_coeff
+        reward = first_match + second_match
 
-        return loss, {'reward': reward.mean(), 'first_match': first_match.mean(), 'second_match': second_match.mean()}
+        if self.training:
+            self.n_points += 1.0
+            self.mean_baseline += (reward.detach().mean().item() -
+                                   self.mean_baseline) / self.n_points
+
+        loss = -((reward - self.mean_baseline) * logprobs).mean() - entropies.mean() * self.entropy_coeff
+
+        return loss, {'reward': reward.mean(), 'first_match': first_match.mean(), 'second_match': second_match.mean(), 'baseline': self.mean_baseline}
