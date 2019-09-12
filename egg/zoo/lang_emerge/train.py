@@ -90,7 +90,7 @@ if __name__ == "__main__":
 
     trainer = core.Trainer(game=game, optimizer=optimizer, train_data=train_loader,
                            validation_data=test_loader,
-                           callbacks=[core.ConsoleLogger(as_json=True)])
+                           callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True)])
     trainer.train(n_epochs=opts.n_epochs)
 
     core.close()
