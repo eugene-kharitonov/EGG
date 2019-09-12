@@ -137,9 +137,10 @@ class Questioner(Bot):
 
 class Game(nn.Module):
     # initialize
-    def __init__(self, a_bot, q_bot, entropy_coeff, memoryless_a=True):
+    def __init__(self, a_bot, q_bot, entropy_coeff, memoryless_a=True, steps=2):
         super().__init__()
-        # memorize params
+
+        self.steps = steps
         self.a_bot = a_bot
         self.q_bot = q_bot
         self.memoryless_a = memoryless_a
@@ -157,12 +158,11 @@ class Game(nn.Module):
 
         a_bot_reply = tasks + self.q_bot.task_offset
         a_bot_reply = a_bot_reply.squeeze(1)
-        n_rounds = 2
 
         sum_log_probs = 0.0
         sum_entropies = 0.0
 
-        for round_id in range(n_rounds):
+        for round_id in range(self.steps):
             self.q_bot.listen(a_bot_reply)
             q_bot_ques, q_logprobs, q_entropy = self.q_bot.speak()
 
