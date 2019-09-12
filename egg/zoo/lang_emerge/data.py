@@ -14,23 +14,17 @@ class Dataset:
         assert mode in ['train', 'test']
         dataset = load_from_file(path)
         self.n_examples = dataset['numInst'][mode]
-        self.n_tasks = len(dataset['taskDefn'])
+
+        self.tasks = dataset['taskDefn']
+        self.n_tasks = len(self.tasks)
 
         self.n_values = {attr: len(vals)
                          for attr, vals in dataset['props'].items()}
         self.attr_val_vocab = sum([len(v) for v in dataset['props'].values()])
 
-        # input vocab for answerer
-        # inVocab and outVocab same for questioner
-        task_vocab = ['<T%d>' % ii for ii in range(self.n_tasks)]
-        # A, Q have different vocabs
-        q_out_vocab = [chr(ii + 97) for ii in range(q_vocab_size)]
-        a_out_vocab = [chr(ii + 65) for ii in range(a_vocab_size)]
-
-        a_in_vocab = q_out_vocab + a_out_vocab
-        q_in_vocab = a_out_vocab + q_out_vocab + task_vocab
-
         self.n_attrs = len(dataset['attributes'])
+        self.n_uniq_attrs = len(dataset['props'])
+
         self.task_select = torch.LongTensor(dataset['taskDefn'])
 
         # number of single and pair wise tasks
@@ -63,16 +57,26 @@ class Dataset:
         self.range_inds = torch.range(0, self.n_examples - 1).long()
 
     def __len__(self):
-        return self.n_examples
+        return self.n_examples * self.n_pair_tasks
 
     def __getitem__(self, idx):
-        return self.data[idx]
+
+        task = idx % self.n_pair_tasks
+        index = self.tasks[task]
+        index = torch.LongTensor(index)
+
+
+        task = torch.LongTensor([task])
+        batch = self.data[idx % self.n_examples]
+
+        label = batch.gather(0, index)
+        return batch, task, label
 
 
 if __name__ == '__main__':
     dataset = Dataset('./data/toy64_split_0.8.json', mode='test')
     train_loader = torch.utils.data.DataLoader(dataset,
-                                               batch_size=32,
+                                               batch_size=1,
                                                shuffle=True, num_workers=1)
 
     for b in train_loader:
