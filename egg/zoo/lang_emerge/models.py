@@ -44,7 +44,7 @@ class Bot(nn.Module):
         return sample, log_prob, entropy
 
 
-class Answerer(ChatBot):
+class Answerer(Bot):
     def __init__(self, batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size,
                 n_attributes,
                 n_uniq_attributes,
@@ -53,7 +53,7 @@ class Answerer(ChatBot):
         super().__init__(batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size)
 
         # rnn inputSize
-        rnn_input_size = n_uniq_attributes * img_feat_size + embed_size;
+        rnn_input_size = n_uniq_attributes * img_feat_size + embed_size
 
         self.img_net = nn.Embedding(n_attributes, img_feat_size)
         self.rnn = nn.LSTMCell(rnn_input_size, hidden_size)
@@ -67,9 +67,13 @@ class Answerer(ChatBot):
         return features
 
 
-class Questioner(ChatBot):
+class Questioner(Bot):
     def __init__(self, batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size,
-            n_preds):
+            n_preds,
+            task_offset,
+            listen_offset):
+        super().__init__(batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size)
+
         self.rnn = nn.LSTMCell(embed_size, hidden_size)
 
         # network for predicting
@@ -77,8 +81,8 @@ class Questioner(ChatBot):
         self.predict_net = nn.Linear(hidden_size, n_preds)
 
         # setting offset
-        self.task_offset = task_offset #params['aOutVocab'] + params['qOutVocab'];
-        self.listen_offset = listen_offset #params['aOutVocab'];
+        self.task_offset = task_offset
+        self.listen_offset = listen_offset
 
     # make a guess the given image
     def guess_attribute(self, input_embeds):
@@ -119,39 +123,54 @@ class Questioner(ChatBot):
         return self.in_net(tasks + self.task_offset)
 
 
-class TwoRoundGame(nn.Module):
-    def __init__(self, q_agent, a_agent, loss, sender_entropy_coeff=0.0):
+class Game(nn.Module):
+    # initialize
+    def __init__(self, a_bot, q_bot, memoryless_a=True):
         super().__init__()
+        # memorize params
+        self.a_bot = a_bot
+        self.q_bot = q_bot
+        self.memoryless_a = memoryless_a
 
-        self.q_agent = q_agent
-        self.a_agent = a_agent
-        self.loss = loss
+    def do_rounds(self, batch, tasks):
+        batch_size = batch.size(0)
+        self.q_bot.reset()
+        self.a_bot.reset()
 
-        self.receiver_entropy_coeff = receiver_entropy_coeff
+        img_embed = self.a_bot.embed_image(batch)
 
-    def forward(self, sender_input, labels, receiver_input=None):
-        message, sender_log_prob, sender_entropy = self.sender(sender_input)
-        receiver_output, receiver_log_prob, receiver_entropy = self.receiver(message, receiver_input)
+        a_bot_reply = tasks + self.q_bot.task_offset
+        n_rounds = 2
 
-        loss, rest_info = self.loss(sender_input, message, receiver_input, receiver_output, labels)
-        policy_loss = ((loss.detach() - self.mean_baseline) * (sender_log_prob + receiver_log_prob)).mean()
-        entropy_loss = -(sender_entropy.mean() * self.sender_entropy_coeff + receiver_entropy.mean() * self.receiver_entropy_coeff)
+        # if the conversation is to be recorded
+        for round_id in range(n_rounds):
+            self.q_bot.listen(a_bot_reply)
+            q_bot_ques = self.q_bot.speak()
 
-        if self.training:
-            self.n_points += 1.0
-            self.mean_baseline += (loss.detach().mean().item() -
-                                   self.mean_baseline) / self.n_points
+            self.q_bot.listen(self.q_bot.listen_offset + q_bot_ques)
 
-        full_loss = policy_loss + entropy_loss + loss.mean()
+            if self.memoryless_a:
+                self.a_bot.reset()
 
-        for k, v in rest_info.items():
-            if hasattr(v, 'mean'):
-                rest_info[k] = v.mean().item()
+            self.a_bot.listen(q_bot_ques, img_embed)
+            a_bot_reply = self.a_bot.speak()
+            self.a_bot.listen(a_bot_reply + self.a_bot.listen_offset, img_embed)
 
-        rest_info['baseline'] = self.mean_baseline
-        rest_info['loss'] = loss.mean().item()
-        rest_info['sender_entropy'] = sender_entropy.mean()
-        rest_info['receiver_entropy'] = receiver_entropy.mean()
+        self.q_bot.listen(a_bot_reply)
 
-        return full_loss, rest_info
+        # predict the image attributes, compute reward
+        sample, logprobs, entropy = self.q_bot.predict(tasks, 2)
 
+        return self.guessToken, self.guessDistr
+
+    def forward(self, batch, tasks, labels):
+        samples, logprobs, entropies = self.do_rounds(batch, tasks)
+
+        first_match = (samples[0] == labels[:, 0:1]).float()
+        second_match = (samples[1] == labels[:, 1:2]).float()
+
+        reward = first_match * second_match
+
+        loss = -reward * logprobs
+
+        return loss
