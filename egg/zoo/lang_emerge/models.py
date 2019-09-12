@@ -12,12 +12,14 @@ class Bot(nn.Module):
         self.in_net = nn.Embedding(in_vocab_size, embed_size)
         self.out_net = nn.Linear(hidden_size, out_vocab_size)
 
-        self.h_state = torch.zeros(batch_size, hidden_size)
-        self.c_state = torch.zeros(batch_size, hidden_size)
+        self.h_state = None
+        self.c_state = None
+
+        self.hidden_size = hidden_size
 
     def reset(self):
-        self.h_state = torch.zeros_like(self.h_state)
-        self.c_state = torch.zeros_like(self.c_state)
+        self.h_state = None
+        self.c_state = None
 
     def listen(self, input_token, img_embed=None):
         # embed and pass through LSTM
@@ -27,7 +29,12 @@ class Bot(nn.Module):
             embeds = torch.cat((embeds, img_embed), dim=-1)
 
         # now pass it through rnn
-        self.hState, self.cState = self.rnn(embeds, (self.hState, self.cState))
+        if self.h_state is None:
+            batch_size = embeds.size(0)
+            self.h_state = torch.zeros(batch_size, self.hidden_size, device=embeds.device)
+            self.c_state = torch.zeros_like(self.h_state)
+
+        self.h_state, self.c_state = self.rnn(embeds, (self.h_state, self.c_state))
 
     def speak(self):
         logits = self.out_net(self.h_state)
@@ -59,12 +66,13 @@ class Answerer(Bot):
         self.rnn = nn.LSTMCell(rnn_input_size, hidden_size)
 
         # set offset
-        self.listen_offset = q_out_vocab
+        self.listen_offset = len(q_out_vocab)
 
     def embed_image(self, x):
+        # NB: different in the original code; appends ones
         embeds = self.img_net(x)
-        features = torch.cat(embeds.transpose(0, 1), 1);
-        return features
+        embeds = embeds.view(embeds.size(0), -1)
+        return embeds
 
 
 class Questioner(Bot):
@@ -110,12 +118,16 @@ class Questioner(Bot):
 
         for _ in range(n_tokens):
             # explicit task dependence
-            task_embeds = self.in_net(tasks)
+            task_embeds = self.in_net(tasks).squeeze(1)
             sample, log_prob, entropy = self.guess_attribute(task_embeds)
 
             samples.append(sample)
             log_probs.append(log_prob)
             entropies.append(entropy)
+
+        samples = torch.cat(samples)
+        log_probs = torch.cat(log_probs)
+        entropies = torch.cat(entropies)
 
         return samples, log_probs, entropies
 
@@ -125,12 +137,13 @@ class Questioner(Bot):
 
 class Game(nn.Module):
     # initialize
-    def __init__(self, a_bot, q_bot, memoryless_a=True):
+    def __init__(self, a_bot, q_bot, entropy_coeff, memoryless_a=True):
         super().__init__()
         # memorize params
         self.a_bot = a_bot
         self.q_bot = q_bot
         self.memoryless_a = memoryless_a
+        self.entropy_coeff = entropy_coeff
 
     def do_rounds(self, batch, tasks):
         batch_size = batch.size(0)
@@ -140,12 +153,13 @@ class Game(nn.Module):
         img_embed = self.a_bot.embed_image(batch)
 
         a_bot_reply = tasks + self.q_bot.task_offset
+        a_bot_reply = a_bot_reply.squeeze(1)
         n_rounds = 2
 
         # if the conversation is to be recorded
         for round_id in range(n_rounds):
             self.q_bot.listen(a_bot_reply)
-            q_bot_ques = self.q_bot.speak()
+            q_bot_ques, q_bot_logprobs, q_bot_entropy = self.q_bot.speak()
 
             self.q_bot.listen(self.q_bot.listen_offset + q_bot_ques)
 
@@ -153,7 +167,7 @@ class Game(nn.Module):
                 self.a_bot.reset()
 
             self.a_bot.listen(q_bot_ques, img_embed)
-            a_bot_reply = self.a_bot.speak()
+            a_bot_reply, a_logprobs, a_entropy = self.a_bot.speak()
             self.a_bot.listen(a_bot_reply + self.a_bot.listen_offset, img_embed)
 
         self.q_bot.listen(a_bot_reply)
@@ -161,7 +175,7 @@ class Game(nn.Module):
         # predict the image attributes, compute reward
         sample, logprobs, entropy = self.q_bot.predict(tasks, 2)
 
-        return self.guessToken, self.guessDistr
+        return sample, logprobs, entropy
 
     def forward(self, batch, tasks, labels):
         samples, logprobs, entropies = self.do_rounds(batch, tasks)
@@ -169,8 +183,8 @@ class Game(nn.Module):
         first_match = (samples[0] == labels[:, 0:1]).float()
         second_match = (samples[1] == labels[:, 1:2]).float()
 
-        reward = first_match * second_match
+        reward = first_match + second_match
 
-        loss = -reward * logprobs
+        loss = -(reward * logprobs).mean() - entropies.mean() * self.entropy_coeff
 
-        return loss
+        return loss, {'reward': reward.mean(), 'first_match': first_match.mean(), 'second_match': second_match.mean()}

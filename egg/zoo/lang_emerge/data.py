@@ -10,7 +10,9 @@ def load_from_file(path):
 
 
 class Dataset:
-    def __init__(self, path, a_vocab_size=4, q_vocab_size=3, mode='train'):
+    def __init__(self, path, a_vocab_size=4, q_vocab_size=3, mode='train', inflate=10):
+        self.inflate = inflate
+
         assert mode in ['train', 'test']
         dataset = load_from_file(path)
         self.n_examples = dataset['numInst'][mode]
@@ -57,7 +59,7 @@ class Dataset:
         self.range_inds = torch.range(0, self.n_examples - 1).long()
 
     def __len__(self):
-        return self.n_examples * self.n_pair_tasks
+        return self.n_examples * self.n_pair_tasks * self.inflate
 
     def __getitem__(self, idx):
 
