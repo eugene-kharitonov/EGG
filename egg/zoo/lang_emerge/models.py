@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 from torch.distributions import Categorical
-
+import torch.nn.functional as F
 
 class Bot(nn.Module):
     def __init__(self, batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size):
@@ -98,38 +98,19 @@ class Questioner(Bot):
         self.h_state, self.c_state = \
                 self.predict_rnn(input_embeds, (self.h_state, self.c_state))
         logits = self.predict_net(self.h_state)
-
-        distr = Categorical(logits=logits)
-        entropy = distr.entropy()
-
-        if self.training:
-            sample = distr.sample()
-        else:
-            sample = logits.argmax(dim=1)
-        log_prob = distr.log_prob(sample)
-
-        return sample, log_prob, entropy
+        return logits
 
     # returning the answer, from the task
     def predict(self, tasks, n_tokens):
-        samples = []
-        log_probs = []
-        entropies = []
+        predictions = []
 
         for _ in range(n_tokens):
             # explicit task dependence
             task_embeds = self.in_net(tasks).squeeze(1)
-            sample, log_prob, entropy = self.guess_attribute(task_embeds)
+            logits = self.guess_attribute(task_embeds)
+            predictions.append(logits)
 
-            samples.append(sample)
-            log_probs.append(log_prob)
-            entropies.append(entropy)
-
-        samples = torch.stack(samples, dim=1)
-        log_probs = torch.stack(log_probs, dim=1)
-        entropies = torch.stack(entropies, dim=1)
-
-        return samples, log_probs, entropies
+        return predictions
 
     def embed_task(self, tasks): 
         return self.in_net(tasks + self.task_offset)
@@ -181,26 +162,27 @@ class Game(nn.Module):
         self.q_bot.listen(a_bot_reply)
 
         # predict the image attributes, compute reward
-        sample, logprobs, entropy = self.q_bot.predict(tasks, 2)
+        predictions = self.q_bot.predict(tasks, 2)
 
-        sum_entropies += entropy.sum(dim=-1)
-        sum_log_probs += logprobs.sum(dim=-1)
-
-        return sample, sum_log_probs, sum_entropies
+        return predictions, sum_log_probs, sum_entropies
 
     def forward(self, batch, tasks, labels):
-        samples, logprobs, entropies = self.do_rounds(batch, tasks)
+        predictions, logprobs, entropies = self.do_rounds(batch, tasks)
 
-        first_match = (samples[:, 0] == labels[:, 0]).float()
-        second_match = (samples[:, 1] == labels[:, 1]).float()
+        first_match = F.cross_entropy(predictions[0], labels[:, 0])
+        second_match = F.cross_entropy(predictions[1], labels[:, 1])
+        
+        first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float().mean()
+        second_acc = (predictions[1].argmax(dim=-1) == labels[:, 1]).float().mean()
 
-        reward = (first_match + second_match) * 0.5
+        loss = -(first_match + second_match)
 
         if self.training:
             self.n_points += 1.0
-            self.mean_baseline += (reward.detach().mean().item() -
+            self.mean_baseline += (loss.detach().mean().item() -
                                    self.mean_baseline) / self.n_points
 
-        loss = -((reward - self.mean_baseline) * logprobs).mean() - entropies.mean() * self.entropy_coeff
+        policy_loss = ((loss - self.mean_baseline) * logprobs).mean()
+        optimized_loss = policy_loss - entropies.mean() * self.entropy_coeff
 
-        return loss, {'reward': reward.mean(), 'first_match': first_match.mean(), 'second_match': second_match.mean(), 'baseline': self.mean_baseline}
+        return optimized_loss, {'first_acc': first_acc, 'second_acc': second_acc, 'baseline': self.mean_baseline}
