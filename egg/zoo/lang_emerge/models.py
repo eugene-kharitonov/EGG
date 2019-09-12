@@ -175,14 +175,14 @@ class Game(nn.Module):
         first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float().mean()
         second_acc = (predictions[1].argmax(dim=-1) == labels[:, 1]).float().mean()
 
-        loss = -(first_match + second_match)
+        loss = first_match + second_match
 
         if self.training:
             self.n_points += 1.0
             self.mean_baseline += (loss.detach().mean().item() -
                                    self.mean_baseline) / self.n_points
 
-        policy_loss = ((loss - self.mean_baseline) * logprobs).mean()
-        optimized_loss = policy_loss - entropies.mean() * self.entropy_coeff
+        policy_loss = ((loss.detach() - self.mean_baseline) * logprobs).mean()
+        optimized_loss = loss + policy_loss - entropies.mean() * self.entropy_coeff
 
         return optimized_loss, {'first_acc': first_acc, 'second_acc': second_acc, 'baseline': self.mean_baseline}
