@@ -125,9 +125,9 @@ class Questioner(Bot):
             log_probs.append(log_prob)
             entropies.append(entropy)
 
-        samples = torch.cat(samples)
-        log_probs = torch.cat(log_probs)
-        entropies = torch.cat(entropies)
+        samples = torch.stack(samples, dim=1)
+        log_probs = torch.stack(log_probs, dim=1)
+        entropies = torch.stack(entropies, dim=1)
 
         return samples, log_probs, entropies
 
@@ -156,10 +156,12 @@ class Game(nn.Module):
         a_bot_reply = a_bot_reply.squeeze(1)
         n_rounds = 2
 
-        # if the conversation is to be recorded
+        sum_log_probs = 0.0
+        sum_entropies = 0.0
+
         for round_id in range(n_rounds):
             self.q_bot.listen(a_bot_reply)
-            q_bot_ques, q_bot_logprobs, q_bot_entropy = self.q_bot.speak()
+            q_bot_ques, q_logprobs, q_entropy = self.q_bot.speak()
 
             self.q_bot.listen(self.q_bot.listen_offset + q_bot_ques)
 
@@ -170,21 +172,26 @@ class Game(nn.Module):
             a_bot_reply, a_logprobs, a_entropy = self.a_bot.speak()
             self.a_bot.listen(a_bot_reply + self.a_bot.listen_offset, img_embed)
 
+            sum_log_probs += q_logprobs + a_logprobs
+            sum_entropies += q_entropy + a_entropy
+
         self.q_bot.listen(a_bot_reply)
 
         # predict the image attributes, compute reward
         sample, logprobs, entropy = self.q_bot.predict(tasks, 2)
 
-        return sample, logprobs, entropy
+        sum_entropies += entropy.sum(dim=1)
+        sum_log_probs += logprobs.sum(dim=1)
+
+        return sample, sum_log_probs, sum_entropies
 
     def forward(self, batch, tasks, labels):
         samples, logprobs, entropies = self.do_rounds(batch, tasks)
 
-        first_match = (samples[0] == labels[:, 0:1]).float()
-        second_match = (samples[1] == labels[:, 1:2]).float()
+        first_match = (samples[:, 0] == labels[:, 0:1]).float()
+        second_match = (samples[:, 1] == labels[:, 1:2]).float()
 
         reward = first_match + second_match
-
         loss = -(reward * logprobs).mean() - entropies.mean() * self.entropy_coeff
 
         return loss, {'reward': reward.mean(), 'first_match': first_match.mean(), 'second_match': second_match.mean()}
