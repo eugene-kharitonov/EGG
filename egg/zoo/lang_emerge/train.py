@@ -13,15 +13,10 @@ from egg.zoo.lang_emerge.models import Answerer, Questioner, Game
 
 def get_params():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--q_hidden', type=int, default=100,
-                        help='Size of the hidden layer of Q-Bot (default: 100)')
-    parser.add_argument('--a_hidden', type=int, default=100,
-                        help='Size of the hidden layer of A-Bot (default: 100)')
-
-    parser.add_argument('--q_embedding', type=int, default=20,
-                        help='Dimensionality of the embedding hidden layer for Q-Bot (default: 20)')
-    parser.add_argument('--a_embedding', type=int, default=20,
-                        help='Dimensionality of the embedding hidden layer for A-Bot (default: 20)')
+    parser.add_argument('--hidden', type=int, default=100,
+                        help='Size of the hidden layer of A/Q-Bot (default: 100)')
+    parser.add_argument('--embedding', type=int, default=20,
+                        help='Dimensionality of the embedding hidden layer for A/Q-Bot (default: 20)')
 
     parser.add_argument('--img_feat_size', default=20, type=int,\
                             help='Image feature size for each attribute')
@@ -79,14 +74,14 @@ if __name__ == "__main__":
     q_task_offset = a_out_vocab_size + q_out_vocab_size
     q_listen_offset = a_out_vocab_size
 
-    q_bot = Questioner(opts.batch_size, opts.q_hidden, opts.q_embedding, len(q_in_vocab), opts.q_out_vocab_size, n_preds, \
+    q_bot = Questioner(opts.batch_size, opts.hidden, opts.embedding, len(q_in_vocab), opts.q_out_vocab_size, n_preds, \
         q_task_offset, q_listen_offset)
 
 
     n_attrs = train_dataset.attr_val_vocab
     n_uniq_attrs = train_dataset.n_uniq_attrs
 
-    a_bot = Answerer(opts.batch_size, opts.a_hidden, opts.a_embedding, len(a_in_vocab), a_out_vocab_size, \
+    a_bot = Answerer(opts.batch_size, opts.hidden, opts.embedding, len(a_in_vocab), a_out_vocab_size, \
              n_attrs, n_uniq_attrs, \
              opts.img_feat_size, q_out_vocab)
 
