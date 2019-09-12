@@ -13,15 +13,15 @@ from egg.zoo.lang_emerge.models import Answerer, Questioner, Game
 
 def get_params():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--q_hidden', type=int, default=50,
-                        help='Size of the hidden layer of Q-Bot (default: 50)')
-    parser.add_argument('--a_hidden', type=int, default=50,
-                        help='Size of the hidden layer of A-Bot (default: 50)')
+    parser.add_argument('--q_hidden', type=int, default=100,
+                        help='Size of the hidden layer of Q-Bot (default: 100)')
+    parser.add_argument('--a_hidden', type=int, default=100,
+                        help='Size of the hidden layer of A-Bot (default: 100)')
 
-    parser.add_argument('--q_embedding', type=int, default=10,
-                        help='Dimensionality of the embedding hidden layer for Q-Bot (default: 10)')
-    parser.add_argument('--a_embedding', type=int, default=10,
-                        help='Dimensionality of the embedding hidden layer for A-Bot (default: 10)')
+    parser.add_argument('--q_embedding', type=int, default=20,
+                        help='Dimensionality of the embedding hidden layer for Q-Bot (default: 20)')
+    parser.add_argument('--a_embedding', type=int, default=20,
+                        help='Dimensionality of the embedding hidden layer for A-Bot (default: 20)')
 
     parser.add_argument('--img_feat_size', default=20, type=int,\
                             help='Image feature size for each attribute')

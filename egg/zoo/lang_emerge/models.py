@@ -191,7 +191,7 @@ class Game(nn.Module):
         first_match = (samples[:, 0] == labels[:, 0:1]).float()
         second_match = (samples[:, 1] == labels[:, 1:2]).float()
 
-        reward = first_match + second_match
+        reward = first_match * second_match
         loss = -(reward * logprobs).mean() - entropies.mean() * self.entropy_coeff
 
         return loss, {'reward': reward.mean(), 'first_match': first_match.mean(), 'second_match': second_match.mean()}
