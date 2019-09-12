@@ -55,8 +55,6 @@ class Dataset:
             self.data[ii] = torch.LongTensor(
                 [self.attr_vocab[at] for at in attr_set])
 
-        # TODO: should it be until n_examples?
-        self.range_inds = torch.range(0, self.n_examples - 1).long()
 
     def __len__(self):
         return self.n_examples * self.n_pair_tasks * self.inflate
