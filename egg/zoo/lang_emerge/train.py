@@ -23,6 +23,7 @@ def get_params():
     parser.add_argument('--q_out_vocab_size', default=3, type=int, help='Output vocab size for Q-Bot')
     parser.add_argument('--a_out_vocab_size', default=4, type=int, help='Output vocab size for A-Bot')
     parser.add_argument('--inflate', default=1, type=int)
+    parser.add_argument('--steps', default=2, type=int)
     parser.add_argument('--memoryless_a', action='store_true')
 
     parser.add_argument('--entropy_coeff', type=float, default=1e-1,
@@ -85,7 +86,7 @@ if __name__ == "__main__":
              n_attrs, n_uniq_attrs, \
              opts.img_feat_size, q_out_vocab)
 
-    game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff, memoryless_a=opts.memoryless_a)
+    game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff, memoryless_a=opts.memoryless_a, steps=opts.steps)
     optimizer = core.build_optimizer(game.parameters())
 
     trainer = core.Trainer(game=game, optimizer=optimizer, train_data=train_loader,
