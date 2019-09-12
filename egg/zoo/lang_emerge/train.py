@@ -24,9 +24,10 @@ def get_params():
                         help='Dimensionality of the embedding hidden layer for A-Bot (default: 10)')
 
     parser.add_argument('--img_feat_size', default=20, type=int,\
-                            help='Image feature size for each attribute');
+                            help='Image feature size for each attribute')
     parser.add_argument('--q_out_vocab_size', default=3, type=int, help='Output vocab size for Q-Bot')
     parser.add_argument('--a_out_vocab_size', default=4, type=int, help='Output vocab size for A-Bot')
+    parser.add_argument('--inflate', default=1, type=int)
     parser.add_argument('--memoryless_a', action='store_true')
 
     parser.add_argument('--entropy_coeff', type=float, default=1e-1,
@@ -48,7 +49,7 @@ if __name__ == "__main__":
     opts = get_params()
     device = torch.device("cuda" if opts.cuda else "cpu")
     
-    train_dataset = Dataset('./data/toy64_split_0.8.json', mode='train', inflate=100)
+    train_dataset = Dataset('./data/toy64_split_0.8.json', mode='train', inflate=opts.inflate)
     test_dataset = Dataset('./data/toy64_split_0.8.json', mode='test')
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
