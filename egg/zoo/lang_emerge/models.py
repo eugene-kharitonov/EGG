@@ -169,8 +169,8 @@ class Game(nn.Module):
     def forward(self, batch, tasks, labels):
         predictions, logprobs, entropies = self.do_rounds(batch, tasks)
 
-        first_match = F.cross_entropy(predictions[0], labels[:, 0], reduce='none')
-        second_match = F.cross_entropy(predictions[1], labels[:, 1], reduce='none')
+        first_match = F.cross_entropy(predictions[0], labels[:, 0], reduction='none')
+        second_match = F.cross_entropy(predictions[1], labels[:, 1], reduction='none')
         
         first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float().mean()
         second_acc = (predictions[1].argmax(dim=-1) == labels[:, 1]).float().mean()
@@ -183,6 +183,6 @@ class Game(nn.Module):
                                    self.mean_baseline) / self.n_points
 
         policy_loss = ((loss.detach() - self.mean_baseline) * logprobs).mean()
-        optimized_loss = loss + policy_loss - entropies.mean() * self.entropy_coeff
+        optimized_loss = loss.mean() + policy_loss - entropies.mean() * self.entropy_coeff
 
         return optimized_loss, {'first_acc': first_acc, 'second_acc': second_acc, 'baseline': self.mean_baseline}
