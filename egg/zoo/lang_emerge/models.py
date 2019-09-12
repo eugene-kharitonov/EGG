@@ -183,8 +183,8 @@ class Game(nn.Module):
         # predict the image attributes, compute reward
         sample, logprobs, entropy = self.q_bot.predict(tasks, 2)
 
-        sum_entropies += entropy[:, 0]#.sum(dim=1)
-        sum_log_probs += logprobs[:, 0]#.sum(dim=1)
+        sum_entropies += entropy.sum(dim=-1)
+        sum_log_probs += logprobs.sum(dim=-1)
 
         return sample, sum_log_probs, sum_entropies
 
@@ -192,10 +192,9 @@ class Game(nn.Module):
         samples, logprobs, entropies = self.do_rounds(batch, tasks)
 
         first_match = (samples[:, 0] == labels[:, 0]).float()
-        second_match = torch.zeros_like(first_match) #0#(samples[:, 1] == labels[:, 1:2]).float()
+        second_match = (samples[:, 1] == labels[:, 1]).float()
 
-        reward = first_match #+ second_match
-        #print(samples[:, 0].size(), labels[:, 0].size(), reward.size())
+        reward = first_match * second_match
 
         if self.training:
             self.n_points += 1.0
