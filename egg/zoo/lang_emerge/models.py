@@ -194,7 +194,7 @@ class Game(nn.Module):
         first_match = (samples[:, 0] == labels[:, 0]).float()
         second_match = (samples[:, 1] == labels[:, 1]).float()
 
-        reward = first_match * second_match
+        reward = (first_match + second_match) * 0.5
 
         if self.training:
             self.n_points += 1.0
