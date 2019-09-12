@@ -157,7 +157,7 @@ class Game(nn.Module):
 
         a_bot_reply = tasks + self.q_bot.task_offset
         a_bot_reply = a_bot_reply.squeeze(1)
-        n_rounds = 1 
+        n_rounds = 2
 
         sum_log_probs = 0.0
         sum_entropies = 0.0
