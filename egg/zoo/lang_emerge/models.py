@@ -169,8 +169,8 @@ class Game(nn.Module):
     def forward(self, batch, tasks, labels):
         predictions, logprobs, entropies = self.do_rounds(batch, tasks)
 
-        first_match = F.cross_entropy(predictions[0], labels[:, 0])
-        second_match = F.cross_entropy(predictions[1], labels[:, 1])
+        first_match = F.cross_entropy(predictions[0], labels[:, 0], reduce='none')
+        second_match = F.cross_entropy(predictions[1], labels[:, 1], reduce='none')
         
         first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float().mean()
         second_acc = (predictions[1].argmax(dim=-1) == labels[:, 1]).float().mean()
