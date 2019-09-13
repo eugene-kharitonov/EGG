@@ -82,17 +82,15 @@ if __name__ == "__main__":
 
     task_vocab = ['<T%d>' % ii for ii in range(train_dataset.n_tasks)]
     q_out_vocab = [chr(ii + 97) for ii in range(opts.q_out_vocab_size)]
-    q_out_vocab_size = len(q_out_vocab)
     a_out_vocab = [chr(ii + 65) for ii in range(opts.a_out_vocab_size)]
-    a_out_vocab_size = len(a_out_vocab)
 
     a_in_vocab =  q_out_vocab + a_out_vocab
     q_in_vocab = a_out_vocab + q_out_vocab + task_vocab
 
     n_preds = train_dataset.attr_val_vocab
 
-    q_task_offset = a_out_vocab_size + q_out_vocab_size
-    q_listen_offset = a_out_vocab_size
+    q_task_offset = opts.a_out_vocab_size + opts.q_out_vocab_size
+    q_listen_offset = opts.a_out_vocab_size
 
     q_bot = Questioner(opts.batch_size, opts.hidden, opts.embedding, len(q_in_vocab), opts.q_out_vocab_size, n_preds, \
         q_task_offset, q_listen_offset)
@@ -101,7 +99,7 @@ if __name__ == "__main__":
     n_attrs = train_dataset.attr_val_vocab
     n_uniq_attrs = train_dataset.n_uniq_attrs
 
-    a_bot = Answerer(opts.batch_size, opts.hidden, opts.embedding, len(a_in_vocab), a_out_vocab_size, \
+    a_bot = Answerer(opts.batch_size, opts.hidden, opts.embedding, len(a_in_vocab), opts.a_out_vocab_size, \
              n_attrs, n_uniq_attrs, \
              opts.img_feat_size, q_out_vocab)
 
