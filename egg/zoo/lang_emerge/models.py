@@ -7,13 +7,11 @@ import torch.nn.functional as F
 
 
 def init_lstm(lstm_cell):
-    for param in lstm_cell.parameters():
-        if len(param.shape) >= 2:
-            # TODO or xavier normal?
-            torch.nn.init.orthogonal_(param.data)
+    for name, param in lstm_cell.named_parameters():
+        if 'bias' in name:
+            torch.nn.init.zeros_(param)
         else:
-            torch.nn.init.normal_(param.data)
-
+            torch.nn.init.xavier_normal_(param)
 
 class Bot(nn.Module):
     def __init__(self, batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size):
