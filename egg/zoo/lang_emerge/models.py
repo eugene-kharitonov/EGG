@@ -203,11 +203,12 @@ class Game(nn.Module):
 
         first_match = F.cross_entropy(predictions[0], labels[:, 0], reduction='none')
         second_match = F.cross_entropy(predictions[1], labels[:, 1], reduction='none')
-        
-        first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float().mean()
-        second_acc = (predictions[1].argmax(dim=-1) == labels[:, 1]).float().mean()
-
         loss = first_match + second_match
+        
+        first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float()
+        second_acc = (predictions[1].argmax(dim=-1) == labels[:, 1]).float()
+
+        acc = first_acc * second_acc
 
         if self.training:
             self.n_points += 1.0
@@ -217,4 +218,5 @@ class Game(nn.Module):
         policy_loss = ((loss.detach() - self.mean_baseline) * logprobs).mean()
         optimized_loss = loss.mean() + policy_loss - entropies.mean() * self.entropy_coeff
 
-        return optimized_loss, {'first_acc': first_acc, 'second_acc': second_acc, 'baseline': self.mean_baseline}
+        return optimized_loss, {'first_acc': first_acc.mean(), 'second_acc': second_acc.mean(), 
+                                'acc': acc.mean(), 'baseline': self.mean_baseline}

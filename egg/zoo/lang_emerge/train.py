@@ -105,9 +105,10 @@ if __name__ == "__main__":
     game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff, memoryless_a=opts.memoryless_a, steps=opts.steps)
     optimizer = core.build_optimizer(game.parameters())
 
+    stopper = core.EarlyStopperAccuracy(1.0, field_name='acc', validation=False)
     trainer = core.Trainer(game=game, optimizer=optimizer, train_data=train_loader,
                            validation_data=test_loader,
-                           callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True)])
+                           callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), stopper])
     trainer.train(n_epochs=opts.n_epochs)
 
     dump_dialogs(game, test_loader)
