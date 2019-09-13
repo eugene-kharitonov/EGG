@@ -5,6 +5,16 @@ import torch.nn as nn
 from torch.distributions import Categorical
 import torch.nn.functional as F
 
+
+def init_lstm(lstm_cell):
+    for param in lstm_cell.parameters():
+        if len(param.shape) >= 2:
+            # TODO or xavier normal?
+            torch.nn.init.orthogonal_(param.data)
+        else:
+            torch.nn.init.normal_(param.data)
+
+
 class Bot(nn.Module):
     def __init__(self, batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size):
         super().__init__()
@@ -65,6 +75,15 @@ class Answerer(Bot):
         self.rnn = nn.LSTMCell(rnn_input_size, hidden_size)
 
         self.listen_offset = len(q_out_vocab)
+        self.init_params()
+
+    def init_params(self):
+        torch.nn.init.xavier_normal_(self.img_net.weight)
+        torch.nn.init.xavier_normal_(self.in_net.weight)
+        torch.nn.init.xavier_normal_(self.out_net.weight)
+        torch.nn.init.zeros_(self.out_net.bias)
+
+        init_lstm(self.rnn)
 
     def embed_image(self, x):
         # NB: different in the original code; appends ones
@@ -87,6 +106,16 @@ class Questioner(Bot):
 
         self.task_offset = task_offset
         self.listen_offset = listen_offset
+        self.init_params()
+
+    def init_params(self):
+        torch.nn.init.xavier_normal_(self.predict_net.weight)
+        torch.nn.init.zeros_(self.predict_net.bias)
+        torch.nn.init.xavier_normal_(self.in_net.weight)
+        torch.nn.init.xavier_normal_(self.out_net.weight)
+        torch.nn.init.zeros_(self.out_net.bias)
+        init_lstm(self.rnn)
+        init_lstm(self.predict_rnn)
 
     def predict(self, tasks, n_tokens):
         predictions = []
