@@ -59,7 +59,6 @@ def dump_dialogs(game, dataloader, device):
             label = labels[i, ...].tolist()
 
             l = f'input: {inp}, task: {dataset.tasks[t]}, communication: {s}, prediction: {p}, label: {label}'
-
             print(l)
 
 if __name__ == "__main__":
@@ -115,7 +114,15 @@ if __name__ == "__main__":
                            callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), stopper])
     trainer.train(n_epochs=opts.n_epochs)
 
+    print('*** TEST ***')
     dump_dialogs(game, test_loader, device)
 
+    train_dataset = Dataset('./data/toy64_split_0.8.json', mode='train', inflate=1)
+    train_loader = torch.utils.data.DataLoader(train_dataset,
+                                               batch_size=opts.batch_size,
+                                               shuffle=False
+                                               )
+    print('*** TRAIN ***')
+    dump_dialogs(game, train_loader, device)
     core.close()
 
