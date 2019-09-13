@@ -55,8 +55,10 @@ def dump_dialogs(game, dataloader, device):
             t = task[i]
             s = [s[i].item() for s in symbols]
             p = [p[i].item() for p in predictions]
+            inp = batch[i, :].tolist()
+            label = labels[i, ...].tolist()
 
-            l = f'input: {batch[i, :]}, task: {dataset.tasks[t]}, communication: {s}, prediction: {p}'
+            l = f'input: {inp}, task: {dataset.tasks[t]}, communication: {s}, prediction: {p}, label: {label}'
 
             print(l)
 
