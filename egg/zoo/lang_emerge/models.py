@@ -130,6 +130,38 @@ class Game(nn.Module):
         self.mean_baseline = 0.0
         self.n_points = 0.0
 
+    def get_dialog(self, batch, tasks):
+        batch_size = batch.size(0)
+        self.q_bot.reset()
+        self.a_bot.reset()
+
+        img_embed = self.a_bot.embed_image(batch)
+
+        a_bot_reply = tasks + self.q_bot.task_offset
+        a_bot_reply = a_bot_reply.squeeze(1)
+
+        symbols = []
+
+        for round_id in range(self.steps):
+            self.q_bot.listen(a_bot_reply)
+            q_bot_ques, *rest = self.q_bot.speak()
+
+            self.q_bot.listen(self.q_bot.listen_offset + q_bot_ques)
+
+            if self.memoryless_a:
+                self.a_bot.reset()
+
+            self.a_bot.listen(q_bot_ques, img_embed)
+            a_bot_reply, *rest = self.a_bot.speak()
+            self.a_bot.listen(a_bot_reply + self.a_bot.listen_offset, img_embed)
+
+            symbols.extend([q_bot_ques, a_bot_reply])
+
+        self.q_bot.listen(a_bot_reply)
+        predictions = self.q_bot.predict(tasks, 2)
+
+        return symbols, predictions
+
     def do_rounds(self, batch, tasks):
         batch_size = batch.size(0)
         self.q_bot.reset()

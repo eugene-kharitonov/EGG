@@ -10,7 +10,7 @@ def load_from_file(path):
 
 
 class Dataset:
-    def __init__(self, path, a_vocab_size=4, q_vocab_size=3, mode='train', inflate=10):
+    def __init__(self, path, a_vocab_size=4, q_vocab_size=3, mode='train', inflate=1):
         self.inflate = inflate
 
         assert mode in ['train', 'test']
