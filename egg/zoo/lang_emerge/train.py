@@ -41,10 +41,12 @@ def loss(sender_input, _message, _receiver_input, receiver_output, _labels):
     return loss, {'acc': acc}
 
 
-def dump_dialogs(game, dataloader):
+def dump_dialogs(game, dataloader, device):
     game.eval()
 
     for batch, task, labels in dataloader:
+        batch, task = batch.to(device), task.to(device)
+
         symbols, predictions = game.get_dialog(batch, task)
         predictions = [p.argmax(dim=-1) for p in predictions]
         dataset = dataloader.dataset
@@ -111,7 +113,7 @@ if __name__ == "__main__":
                            callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), stopper])
     trainer.train(n_epochs=opts.n_epochs)
 
-    dump_dialogs(game, test_loader)
+    dump_dialogs(game, test_loader, device)
 
     core.close()
 
