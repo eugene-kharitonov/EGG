@@ -59,13 +59,11 @@ class Answerer(Bot):
                 q_out_vocab):
         super().__init__(batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size)
 
-        # rnn inputSize
         rnn_input_size = n_uniq_attributes * img_feat_size + embed_size
 
         self.img_net = nn.Embedding(n_attributes, img_feat_size)
         self.rnn = nn.LSTMCell(rnn_input_size, hidden_size)
 
-        # set offset
         self.listen_offset = len(q_out_vocab)
 
     def embed_image(self, x):
@@ -84,30 +82,20 @@ class Questioner(Bot):
 
         self.rnn = nn.LSTMCell(embed_size, hidden_size)
 
-        # network for predicting
         self.predict_rnn = nn.LSTMCell(embed_size, hidden_size)
         self.predict_net = nn.Linear(hidden_size, n_preds)
 
-        # setting offset
         self.task_offset = task_offset
         self.listen_offset = listen_offset
 
-    # make a guess the given image
-    def guess_attribute(self, input_embeds):
-        # compute softmax and choose a token
-        self.h_state, self.c_state = \
-                self.predict_rnn(input_embeds, (self.h_state, self.c_state))
-        logits = self.predict_net(self.h_state)
-        return logits
-
-    # returning the answer, from the task
     def predict(self, tasks, n_tokens):
         predictions = []
 
         for _ in range(n_tokens):
-            # explicit task dependence
             task_embeds = self.in_net(tasks).squeeze(1)
-            logits = self.guess_attribute(task_embeds)
+            self.h_state, self.c_state = \
+                self.predict_rnn(task_embeds, (self.h_state, self.c_state))
+            logits = self.predict_net(self.h_state)
             predictions.append(logits)
 
         return predictions
