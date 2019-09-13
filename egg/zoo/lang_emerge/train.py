@@ -41,6 +41,23 @@ def loss(sender_input, _message, _receiver_input, receiver_output, _labels):
     return loss, {'acc': acc}
 
 
+def dump_dialogs(game, dataloader):
+    game.eval()
+
+    for batch, task, labels in dataloader:
+        symbols, predictions = game.get_dialog(batch, task)
+        predictions = [p.argmax(dim=-1) for p in predictions]
+        dataset = dataloader.dataset
+
+        for i in range(batch.size(0)):
+            t = task[i]
+            s = [s[i].item() for s in symbols]
+            p = [p[i].item() for p in predictions]
+
+            l = f'input: {batch[i, :]}, task: {dataset.tasks[t]}, communication: {s}, prediction: {p}'
+
+            print(l)
+
 if __name__ == "__main__":
     opts = get_params()
     device = torch.device("cuda" if opts.cuda else "cpu")
@@ -53,11 +70,10 @@ if __name__ == "__main__":
                                                shuffle=True
                                                )
 
-    test_loader = torch.utils.data.DataLoader(train_dataset,
+    test_loader = torch.utils.data.DataLoader(test_dataset,
                                                batch_size=opts.batch_size,
                                                shuffle=False
                                                )
-
 
     assert train_dataset.n_tasks == test_dataset.n_tasks
 
@@ -93,6 +109,8 @@ if __name__ == "__main__":
                            validation_data=test_loader,
                            callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True)])
     trainer.train(n_epochs=opts.n_epochs)
+
+    dump_dialogs(game, test_loader)
 
     core.close()
 
