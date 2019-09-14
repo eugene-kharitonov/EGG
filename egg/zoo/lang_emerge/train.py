@@ -28,18 +28,11 @@ def get_params():
 
     parser.add_argument('--entropy_coeff', type=float, default=1e-1,
                         help='The entropy regularisation coefficient (default: 1e-1)')
+    parser.add_argument('--loss', type=str, choices=['sum', 'both', 'diff'], default='diff')
 
     args = core.init(parser)
 
     return args
-
-
-def loss(sender_input, _message, _receiver_input, receiver_output, _labels):
-    assert False
-    acc = (receiver_output.argmax(dim=1) == sender_input.argmax(dim=1)).detach().float()
-    loss = F.cross_entropy(receiver_output, sender_input.argmax(dim=1), reduction="none")
-    return loss, {'acc': acc}
-
 
 def dump_dialogs(game, dataloader, device):
     game.eval()
@@ -103,7 +96,8 @@ if __name__ == "__main__":
              n_attrs, n_uniq_attrs, \
              opts.img_feat_size, q_out_vocab)
 
-    game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff, memoryless_a=opts.memoryless_a, steps=opts.steps)
+    game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff, memoryless_a=opts.memoryless_a, steps=opts.steps, \
+        loss=opts.loss)
     optimizer = core.build_optimizer(game.parameters())
 
     stopper = core.EarlyStopperAccuracy(1.0, field_name='acc', validation=False)

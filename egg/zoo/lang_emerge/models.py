@@ -30,9 +30,7 @@ class Bot(nn.Module):
         self.c_state = None
 
     def listen(self, input_token, img_embed=None):
-        # embed and pass through LSTM
         embeds = self.in_net(input_token)
-        # concat with image representation
         if img_embed is not None:
             embeds = torch.cat((embeds, img_embed), dim=-1)
 
@@ -127,13 +125,10 @@ class Questioner(Bot):
 
         return predictions
 
-    def embed_task(self, tasks): 
-        return self.in_net(tasks + self.task_offset)
-
 
 class Game(nn.Module):
-    # initialize
-    def __init__(self, a_bot, q_bot, entropy_coeff, memoryless_a=True, steps=2):
+    def __init__(self, a_bot, q_bot, entropy_coeff, memoryless_a=True, 
+            steps=2, loss='diff'):
         super().__init__()
 
         self.steps = steps
@@ -144,6 +139,7 @@ class Game(nn.Module):
 
         self.mean_baseline = 0.0
         self.n_points = 0.0
+        self.loss = loss
 
     def get_dialog(self, batch, tasks):
         batch_size = batch.size(0)
@@ -159,7 +155,7 @@ class Game(nn.Module):
 
         for round_id in range(self.steps):
             self.q_bot.listen(a_bot_reply)
-            q_bot_ques, *rest = self.q_bot.speak()
+            q_bot_ques, *_ = self.q_bot.speak()
 
             self.q_bot.listen(self.q_bot.listen_offset + q_bot_ques)
 
@@ -167,14 +163,13 @@ class Game(nn.Module):
                 self.a_bot.reset()
 
             self.a_bot.listen(q_bot_ques, img_embed)
-            a_bot_reply, *rest = self.a_bot.speak()
+            a_bot_reply, *_ = self.a_bot.speak()
             self.a_bot.listen(a_bot_reply + self.a_bot.listen_offset, img_embed)
 
             symbols.extend([q_bot_ques, a_bot_reply])
 
         self.q_bot.listen(a_bot_reply)
         predictions = self.q_bot.predict(tasks, 2)
-
         return symbols, predictions
 
     def do_rounds(self, batch, tasks):
@@ -216,14 +211,18 @@ class Game(nn.Module):
     def forward(self, batch, tasks, labels):
         predictions, logprobs, entropies = self.do_rounds(batch, tasks)
 
-        first_match = F.cross_entropy(predictions[0], labels[:, 0], reduction='none')
-        second_match = F.cross_entropy(predictions[1], labels[:, 1], reduction='none')
-        loss = first_match + second_match
-        
         first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float()
         second_acc = (predictions[1].argmax(dim=-1) == labels[:, 1]).float()
-
         acc = first_acc * second_acc
+
+        if self.loss == 'diff':
+            first_match = F.cross_entropy(predictions[0], labels[:, 0], reduction='none')
+            second_match = F.cross_entropy(predictions[1], labels[:, 1], reduction='none')
+            loss = first_match + second_match
+        elif self.loss == 'sum':
+            loss = acc
+        elif self.loss == 'both':
+            loss = first_acc * second_acc
 
         if self.training:
             self.n_points += 1.0
