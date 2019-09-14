@@ -125,6 +125,31 @@ class Questioner(Bot):
 
         return predictions
 
+    def predict_sample(self, tasks, n_tokens):
+        samples = []
+        logprobs = []
+        entropies = []
+
+        for _ in range(n_tokens):
+            task_embeds = self.in_net(tasks).squeeze(1)
+            self.h_state, self.c_state = \
+                self.predict_rnn(task_embeds, (self.h_state, self.c_state))
+            logits = self.predict_net(self.h_state)
+
+            distr = Categorical(logits=logits)
+            entropy = distr.entropy()
+
+            if self.training:
+                sample = distr.sample()
+            else:
+                sample = logits.argmax(dim=1)
+            logprob = distr.log_prob(sample)
+
+            samples.append(sample)
+            logprobs.append(logprob)
+            entropies.append(entropy)
+
+        return samples, logprobs, entropies
 
 class Game(nn.Module):
     def __init__(self, a_bot, q_bot, entropy_coeff, memoryless_a=True, 
@@ -139,7 +164,7 @@ class Game(nn.Module):
 
         self.mean_baseline = 0.0
         self.n_points = 0.0
-        self.loss = loss
+        self.loss_type = loss
 
     def get_dialog(self, batch, tasks):
         batch_size = batch.size(0)
@@ -173,10 +198,6 @@ class Game(nn.Module):
         return symbols, predictions
 
     def do_rounds(self, batch, tasks):
-        batch_size = batch.size(0)
-        self.q_bot.reset()
-        self.a_bot.reset()
-
         img_embed = self.a_bot.embed_image(batch)
 
         a_bot_reply = tasks + self.q_bot.task_offset
@@ -202,35 +223,44 @@ class Game(nn.Module):
             sum_entropies += q_entropy + a_entropy
 
         self.q_bot.listen(a_bot_reply)
-
-        # predict the image attributes, compute reward
-        predictions = self.q_bot.predict(tasks, 2)
-
-        return predictions, sum_log_probs, sum_entropies
+        return sum_log_probs, sum_entropies
 
     def forward(self, batch, tasks, labels):
-        predictions, logprobs, entropies = self.do_rounds(batch, tasks)
+        self.q_bot.reset()
+        self.a_bot.reset()
 
-        first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float()
-        second_acc = (predictions[1].argmax(dim=-1) == labels[:, 1]).float()
-        acc = first_acc * second_acc
+        logprobs, entropies = self.do_rounds(batch, tasks)
 
-        if self.loss == 'diff':
+        if self.loss_type == 'diff':
+            predictions = self.q_bot.predict(tasks, 2)
+
+            first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float()
+            second_acc = (predictions[1].argmax(dim=-1) == labels[:, 1]).float()
+
             first_match = F.cross_entropy(predictions[0], labels[:, 0], reduction='none')
             second_match = F.cross_entropy(predictions[1], labels[:, 1], reduction='none')
             loss = first_match + second_match
-        elif self.loss == 'sum':
-            loss = acc
-        elif self.loss == 'both':
-            loss = first_acc * second_acc
+        else:
+            predictions, predict_logprobs, predict_entropies = self.q_bot.predict_sample(tasks, 2)
+            logprobs += sum(predict_logprobs)
+            entropies += sum(predict_entropies)
+            first_acc = (predictions[0] == labels[:, 0]).float()
+            second_acc = (predictions[1] == labels[:, 1]).float()
+            if self.loss_type == 'sum':
+                loss = first_acc + second_acc
+            elif self.loss_type == 'both':
+                loss = first_acc * second_acc
+
+
+        policy_loss = ((loss.detach() - self.mean_baseline) * logprobs).mean()
+        optimized_loss = loss.mean() + policy_loss - entropies.mean() * self.entropy_coeff
 
         if self.training:
             self.n_points += 1.0
             self.mean_baseline += (loss.detach().mean().item() -
                                    self.mean_baseline) / self.n_points
 
-        policy_loss = ((loss.detach() - self.mean_baseline) * logprobs).mean()
-        optimized_loss = loss.mean() + policy_loss - entropies.mean() * self.entropy_coeff
+        acc = first_acc * second_acc
 
         return optimized_loss, {'first_acc': first_acc.mean(), 'second_acc': second_acc.mean(), 
                                 'acc': acc.mean(), 'baseline': self.mean_baseline}
