@@ -249,7 +249,8 @@ class Game(nn.Module):
             if self.loss_type == 'sum':
                 loss = first_acc + second_acc
             elif self.loss_type == 'both':
-                loss = first_acc * second_acc
+                both = first_acc * second_acc
+                loss = -10 * (both < 0.5).float() + (both > 0.5).float()
 
 
         policy_loss = ((loss.detach() - self.mean_baseline) * logprobs).mean()
