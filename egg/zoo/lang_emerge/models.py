@@ -247,7 +247,7 @@ class Game(nn.Module):
             first_acc = (predictions[0] == labels[:, 0]).float()
             second_acc = (predictions[1] == labels[:, 1]).float()
             if self.loss_type == 'sum':
-                loss = -first_acc + second_acc  # -reward 
+                loss = -first_acc - second_acc  # -reward 
             elif self.loss_type == 'both':
                 both = first_acc * second_acc
                 loss = 10 * (both < 0.5).float() - (both > 0.5).float()
