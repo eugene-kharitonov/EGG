@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from torch.distributions import Categorical
 import torch.nn.functional as F
+from torch.distributions import RelaxedOneHotCategorical
 
 
 def init_lstm(lstm_cell):
@@ -13,24 +14,40 @@ def init_lstm(lstm_cell):
         else:
             torch.nn.init.xavier_normal_(param)
 
+class RelaxedEmbeddingWithOffset(nn.Embedding):
+    def forward(self, x, offset=0):
+        if isinstance(x, torch.LongTensor) or (torch.cuda.is_available() and isinstance(x, torch.cuda.LongTensor)):
+            return F.embedding(x + offset, self.weight, self.padding_idx, self.max_norm, self.norm_type, self.scale_grad_by_freq, self.sparse)
+        else:
+            #print('padding', x.size(), self.weight.size())
+            padded = torch.zeros(x.size(0), self.weight.size(0), device=x.device)
+            padded[:, offset:offset+x.size(1)] += x
+            #print('got tensor', x.size(), 'padded to', padded.size())
+            return torch.matmul(padded, self.weight)
+
+
 class Bot(nn.Module):
-    def __init__(self, batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size):
+    def __init__(self, batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size, 
+                temperature=1.0):
         super().__init__()
 
-        self.in_net = nn.Embedding(in_vocab_size, embed_size)
+        self.in_net = RelaxedEmbeddingWithOffset(in_vocab_size, embed_size)
         self.out_net = nn.Linear(hidden_size, out_vocab_size)
 
         self.h_state = None
         self.c_state = None
 
         self.hidden_size = hidden_size
+        self.in_vocab_size = in_vocab_size
+        self.embedding_size = embed_size
+        self.temperature = temperature
 
     def reset(self):
         self.h_state = None
         self.c_state = None
 
-    def listen(self, input_token, img_embed=None):
-        embeds = self.in_net(input_token)
+    def listen(self, input_token, img_embed=None, offset=0):
+        embeds = self.in_net(input_token, offset)
         if img_embed is not None:
             embeds = torch.cat((embeds, img_embed), dim=-1)
 
@@ -45,16 +62,12 @@ class Bot(nn.Module):
     def speak(self):
         logits = self.out_net(self.h_state)
 
-        distr = Categorical(logits=logits)
-        entropy = distr.entropy()
-
-        if self.training:
-            sample = distr.sample()
+        if not self.training:
+            sample = torch.zeros_like(logits).scatter_(-1, logits.argmax(dim=-1, keepdim=True), 1.0)
         else:
-            sample = logits.argmax(dim=1)
-        log_prob = distr.log_prob(sample)
+            sample = RelaxedOneHotCategorical(logits=logits, temperature=self.temperature).rsample()
 
-        return sample, log_prob, entropy
+        return sample
 
 
 class Answerer(Bot):
@@ -169,36 +182,25 @@ class Game(nn.Module):
     def do_rounds(self, batch, tasks):
         img_embed = self.a_bot.embed_image(batch)
 
-        a_bot_reply = tasks + self.q_bot.task_offset
-        a_bot_reply = a_bot_reply.squeeze(1)
-
-        sum_log_probs = 0.0
-        sum_entropies = 0.0
+        self.q_bot.listen(tasks.squeeze(1), offset=self.q_bot.task_offset)
 
         for round_id in range(self.steps):
-            self.q_bot.listen(a_bot_reply)
-            q_bot_ques, q_logprobs, q_entropy = self.q_bot.speak()
-
-            self.q_bot.listen(self.q_bot.listen_offset + q_bot_ques)
+            ques = self.q_bot.speak()
+            self.q_bot.listen(ques, offset=self.q_bot.listen_offset)
 
             if self.memoryless_a:
                 self.a_bot.reset()
 
-            self.a_bot.listen(q_bot_ques, img_embed)
-            a_bot_reply, a_logprobs, a_entropy = self.a_bot.speak()
-            self.a_bot.listen(a_bot_reply + self.a_bot.listen_offset, img_embed)
-
-            sum_log_probs += q_logprobs + a_logprobs
-            sum_entropies += q_entropy + a_entropy
-
-        self.q_bot.listen(a_bot_reply)
-        return sum_log_probs, sum_entropies
+            self.a_bot.listen(ques, img_embed)
+            a_bot_reply = self.a_bot.speak()
+            self.a_bot.listen(a_bot_reply, offset=self.a_bot.listen_offset, img_embed=img_embed)
+            self.q_bot.listen(a_bot_reply)
 
     def forward(self, batch, tasks, labels):
         self.q_bot.reset()
         self.a_bot.reset()
 
-        logprobs, entropies = self.do_rounds(batch, tasks)
+        self.do_rounds(batch, tasks)
 
         predictions = self.q_bot.predict(tasks)
 
@@ -209,15 +211,7 @@ class Game(nn.Module):
         second_match = F.cross_entropy(predictions[1], labels[:, 1], reduction='none')
         loss = first_match + second_match
 
-        policy_loss = ((loss.detach() - self.mean_baseline) * logprobs).mean()
-        optimized_loss = loss.mean() + policy_loss - entropies.mean() * self.entropy_coeff
-
-        if self.training:
-            self.n_points += 1.0
-            self.mean_baseline += (loss.detach().mean().item() -
-                                   self.mean_baseline) / self.n_points
-
         acc = first_acc * second_acc
 
-        return optimized_loss, {'first_acc': first_acc.mean(), 'second_acc': second_acc.mean(), 
+        return loss.mean(), {'first_acc': first_acc.mean(), 'second_acc': second_acc.mean(), 
                                 'acc': acc.mean(), 'baseline': self.mean_baseline}
