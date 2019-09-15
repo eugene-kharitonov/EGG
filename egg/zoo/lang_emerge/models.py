@@ -65,9 +65,10 @@ class Bot(nn.Module):
         if not self.training:
             sample = torch.zeros_like(logits).scatter_(-1, logits.argmax(dim=-1, keepdim=True), 1.0)
         else:
-            sample = RelaxedOneHotCategorical(logits=logits, temperature=self.temperature).rsample()
+            distr = RelaxedOneHotCategorical(logits=logits, temperature=self.temperature)
+            sample = distr.rsample()
 
-        return sample
+        return sample, Categorical(logits=logits).entropy()
 
 
 class Answerer(Bot):
@@ -148,32 +149,38 @@ class Game(nn.Module):
         self.mean_baseline = 0.0
         self.n_points = 0.0
 
+        entropies = []
+
     def do_rounds(self, batch, tasks):
         dialog = []
+        entropies = []
         img_embed = self.a_bot.embed_image(batch)
 
         self.q_bot.listen(tasks.squeeze(1), offset=self.q_bot.task_offset)
 
         for round_id in range(self.steps):
-            ques = self.q_bot.speak()
+            ques, q_entropy = self.q_bot.speak()
             self.q_bot.listen(ques, offset=self.q_bot.listen_offset)
 
             if self.memoryless_a:
                 self.a_bot.reset()
 
             self.a_bot.listen(ques, img_embed)
-            a_bot_reply = self.a_bot.speak()
+            a_bot_reply, a_entropy = self.a_bot.speak()
             self.a_bot.listen(a_bot_reply, offset=self.a_bot.listen_offset, img_embed=img_embed)
             self.q_bot.listen(a_bot_reply)
 
             dialog.extend([ques.detach(), a_bot_reply.detach()])
-        return dialog
+            entropies.extend([q_entropy, a_entropy])
+
+        return dialog, entropies
 
     def forward(self, batch, tasks, labels):
         self.q_bot.reset()
         self.a_bot.reset()
 
-        _ = self.do_rounds(batch, tasks)
+        _, entropies = self.do_rounds(batch, tasks)
+
         predictions = self.q_bot.predict(tasks)
 
         first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float()
@@ -181,9 +188,11 @@ class Game(nn.Module):
 
         first_match = F.cross_entropy(predictions[0], labels[:, 0], reduction='none')
         second_match = F.cross_entropy(predictions[1], labels[:, 1], reduction='none')
-        loss = first_match + second_match
+        entropy = sum(entropies).mean()
+
+        loss = first_match + second_match + self.entropy_coeff * entropy
 
         acc = first_acc * second_acc
 
         return loss.mean(), {'first_acc': first_acc.mean(), 'second_acc': second_acc.mean(), 
-                                'acc': acc.mean(), 'baseline': self.mean_baseline}
+                                'acc': acc.mean(), 'entropy': entropy}

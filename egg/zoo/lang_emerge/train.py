@@ -44,7 +44,7 @@ def dump_dialogs(game, dataloader, device):
 
         batch, task = batch.to(device), task.to(device)
 
-        symbols = game.do_rounds(batch, task)
+        symbols, _ = game.do_rounds(batch, task)
         symbols = [s.argmax(dim=-1) for s in symbols]
 
         predictions = game.q_bot.predict(task)
