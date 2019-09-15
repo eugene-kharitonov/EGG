@@ -59,7 +59,8 @@ if __name__ == "__main__":
     device = torch.device("cuda" if opts.cuda else "cpu")
     
     train_dataset = Dataset('./data/toy64_split_0.8.json', mode='train', inflate=opts.inflate)
-    test_dataset = Dataset('./data/toy64_split_0.8.json', mode='test')
+    test_dataset = Dataset('./data/toy64_split_0.8.json', mode='train', inflate=1)
+    #test_dataset = Dataset('./data/toy64_split_0.8.json', mode='test')
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=opts.batch_size,
