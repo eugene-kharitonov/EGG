@@ -97,63 +97,33 @@ class Questioner(Bot):
 
         self.rnn = nn.LSTMCell(embed_size, hidden_size)
 
-        self.predict_rnn = nn.LSTMCell(embed_size, hidden_size)
-        self.predict_net = nn.Linear(hidden_size, n_preds)
+        self.predict_net_0 = nn.Linear(hidden_size, n_preds, bias=False)
+        self.predict_net_1 = nn.Linear(hidden_size, n_preds, bias=False)
 
         self.task_offset = task_offset
         self.listen_offset = listen_offset
         self.init_params()
 
     def init_params(self):
-        torch.nn.init.xavier_normal_(self.predict_net.weight)
-        torch.nn.init.zeros_(self.predict_net.bias)
+        #torch.nn.init.xavier_normal_(self.predict_net.weight)
+        #torch.nn.init.zeros_(self.predict_net.bias)
         torch.nn.init.xavier_normal_(self.in_net.weight)
         torch.nn.init.xavier_normal_(self.out_net.weight)
         torch.nn.init.zeros_(self.out_net.bias)
         init_lstm(self.rnn)
-        init_lstm(self.predict_rnn)
+        #init_lstm(self.predict_rnn)
 
-    def predict(self, tasks, n_tokens):
-        predictions = []
-
-        for _ in range(n_tokens):
-            task_embeds = self.in_net(tasks).squeeze(1)
-            self.h_state, self.c_state = \
-                self.predict_rnn(task_embeds, (self.h_state, self.c_state))
-            logits = self.predict_net(self.h_state)
-            predictions.append(logits)
-
+    def predict(self, tasks):
+        predictions = [
+            self.predict_net_0(self.h_state),
+            self.predict_net_1(self.h_state)
+            ]
         return predictions
 
-    def predict_sample(self, tasks, n_tokens):
-        samples = []
-        logprobs = []
-        entropies = []
-
-        for _ in range(n_tokens):
-            task_embeds = self.in_net(tasks).squeeze(1)
-            self.h_state, self.c_state = \
-                self.predict_rnn(task_embeds, (self.h_state, self.c_state))
-            logits = self.predict_net(self.h_state)
-
-            distr = Categorical(logits=logits)
-            entropy = distr.entropy()
-
-            if self.training:
-                sample = distr.sample()
-            else:
-                sample = logits.argmax(dim=1)
-            logprob = distr.log_prob(sample)
-
-            samples.append(sample)
-            logprobs.append(logprob)
-            entropies.append(entropy)
-
-        return samples, logprobs, entropies
 
 class Game(nn.Module):
     def __init__(self, a_bot, q_bot, entropy_coeff, memoryless_a=True, 
-            steps=2, loss='diff'):
+            steps=2):
         super().__init__()
 
         self.steps = steps
@@ -164,7 +134,6 @@ class Game(nn.Module):
 
         self.mean_baseline = 0.0
         self.n_points = 0.0
-        self.loss_type = loss
 
     def get_dialog(self, batch, tasks):
         batch_size = batch.size(0)
@@ -194,7 +163,7 @@ class Game(nn.Module):
             symbols.extend([q_bot_ques, a_bot_reply])
 
         self.q_bot.listen(a_bot_reply)
-        predictions = self.q_bot.predict(tasks, 2)
+        predictions = self.q_bot.predict(tasks)
         return symbols, predictions
 
     def do_rounds(self, batch, tasks):
@@ -231,27 +200,14 @@ class Game(nn.Module):
 
         logprobs, entropies = self.do_rounds(batch, tasks)
 
-        if self.loss_type == 'diff':
-            predictions = self.q_bot.predict(tasks, 2)
+        predictions = self.q_bot.predict(tasks)
 
-            first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float()
-            second_acc = (predictions[1].argmax(dim=-1) == labels[:, 1]).float()
+        first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float()
+        second_acc = (predictions[1].argmax(dim=-1) == labels[:, 1]).float()
 
-            first_match = F.cross_entropy(predictions[0], labels[:, 0], reduction='none')
-            second_match = F.cross_entropy(predictions[1], labels[:, 1], reduction='none')
-            loss = first_match + second_match
-        else:
-            predictions, predict_logprobs, predict_entropies = self.q_bot.predict_sample(tasks, 2)
-            logprobs += sum(predict_logprobs)
-            entropies += sum(predict_entropies)
-            first_acc = (predictions[0] == labels[:, 0]).float()
-            second_acc = (predictions[1] == labels[:, 1]).float()
-            if self.loss_type == 'sum':
-                loss = -first_acc - second_acc  # -reward 
-            elif self.loss_type == 'both':
-                both = first_acc * second_acc
-                loss = 10 * (both < 0.5).float() - (both > 0.5).float()
-
+        first_match = F.cross_entropy(predictions[0], labels[:, 0], reduction='none')
+        second_match = F.cross_entropy(predictions[1], labels[:, 1], reduction='none')
+        loss = first_match + second_match
 
         policy_loss = ((loss.detach() - self.mean_baseline) * logprobs).mean()
         optimized_loss = loss.mean() + policy_loss - entropies.mean() * self.entropy_coeff

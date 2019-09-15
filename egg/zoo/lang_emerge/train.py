@@ -96,8 +96,7 @@ if __name__ == "__main__":
              n_attrs, n_uniq_attrs, \
              opts.img_feat_size, q_out_vocab)
 
-    game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff, memoryless_a=opts.memoryless_a, steps=opts.steps, \
-        loss=opts.loss)
+    game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff, memoryless_a=opts.memoryless_a, steps=opts.steps)
     optimizer = core.build_optimizer(game.parameters())
 
     stopper = core.EarlyStopperAccuracy(1.0, field_name='acc', validation=False)
