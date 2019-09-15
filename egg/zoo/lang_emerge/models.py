@@ -75,8 +75,8 @@ class Answerer(Bot):
                 n_attributes,
                 n_uniq_attributes,
                 img_feat_size,
-                q_out_vocab):
-        super().__init__(batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size)
+                q_out_vocab, temperature=1.0):
+        super().__init__(batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size, temperature=temperature)
 
         rnn_input_size = n_uniq_attributes * img_feat_size + embed_size
 
@@ -105,8 +105,8 @@ class Questioner(Bot):
     def __init__(self, batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size,
             n_preds,
             task_offset,
-            listen_offset):
-        super().__init__(batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size)
+            listen_offset, temperature):
+        super().__init__(batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size, temperature=temperature)
 
         self.rnn = nn.LSTMCell(embed_size, hidden_size)
 
@@ -148,38 +148,8 @@ class Game(nn.Module):
         self.mean_baseline = 0.0
         self.n_points = 0.0
 
-    def get_dialog(self, batch, tasks):
-        batch_size = batch.size(0)
-        self.q_bot.reset()
-        self.a_bot.reset()
-
-        img_embed = self.a_bot.embed_image(batch)
-
-        a_bot_reply = tasks + self.q_bot.task_offset
-        a_bot_reply = a_bot_reply.squeeze(1)
-
-        symbols = []
-
-        for round_id in range(self.steps):
-            self.q_bot.listen(a_bot_reply)
-            q_bot_ques, *_ = self.q_bot.speak()
-
-            self.q_bot.listen(self.q_bot.listen_offset + q_bot_ques)
-
-            if self.memoryless_a:
-                self.a_bot.reset()
-
-            self.a_bot.listen(q_bot_ques, img_embed)
-            a_bot_reply, *_ = self.a_bot.speak()
-            self.a_bot.listen(a_bot_reply + self.a_bot.listen_offset, img_embed)
-
-            symbols.extend([q_bot_ques, a_bot_reply])
-
-        self.q_bot.listen(a_bot_reply)
-        predictions = self.q_bot.predict(tasks)
-        return symbols, predictions
-
     def do_rounds(self, batch, tasks):
+        dialog = []
         img_embed = self.a_bot.embed_image(batch)
 
         self.q_bot.listen(tasks.squeeze(1), offset=self.q_bot.task_offset)
@@ -196,12 +166,14 @@ class Game(nn.Module):
             self.a_bot.listen(a_bot_reply, offset=self.a_bot.listen_offset, img_embed=img_embed)
             self.q_bot.listen(a_bot_reply)
 
+            dialog.extend([ques.detach(), a_bot_reply.detach()])
+        return dialog
+
     def forward(self, batch, tasks, labels):
         self.q_bot.reset()
         self.a_bot.reset()
 
-        self.do_rounds(batch, tasks)
-
+        _ = self.do_rounds(batch, tasks)
         predictions = self.q_bot.predict(tasks)
 
         first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float()

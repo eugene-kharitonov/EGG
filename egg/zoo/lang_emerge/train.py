@@ -24,6 +24,7 @@ def get_params():
     parser.add_argument('--a_out_vocab_size', default=4, type=int, help='Output vocab size for A-Bot')
     parser.add_argument('--inflate', default=1, type=int)
     parser.add_argument('--steps', default=2, type=int)
+    parser.add_argument('--temperature', default=1.0, type=float)
     parser.add_argument('--memoryless_a', action='store_true')
 
     parser.add_argument('--entropy_coeff', type=float, default=1e-1,
@@ -38,10 +39,17 @@ def dump_dialogs(game, dataloader, device):
     game.eval()
 
     for batch, task, labels in dataloader:
+        game.q_bot.reset()
+        game.a_bot.reset()
+
         batch, task = batch.to(device), task.to(device)
 
-        symbols, predictions = game.get_dialog(batch, task)
+        symbols = game.do_rounds(batch, task)
+        symbols = [s.argmax(dim=-1) for s in symbols]
+
+        predictions = game.q_bot.predict(task)
         predictions = [p.argmax(dim=-1) for p in predictions]
+
         dataset = dataloader.dataset
 
         for i in range(batch.size(0)):
@@ -87,7 +95,7 @@ if __name__ == "__main__":
     q_listen_offset = opts.a_out_vocab_size
 
     q_bot = Questioner(opts.batch_size, opts.hidden, opts.embedding, len(q_in_vocab), opts.q_out_vocab_size, n_preds, \
-        q_task_offset, q_listen_offset)
+        q_task_offset, q_listen_offset, temperature=opts.temperature)
 
 
     n_attrs = train_dataset.attr_val_vocab
@@ -95,7 +103,7 @@ if __name__ == "__main__":
 
     a_bot = Answerer(opts.batch_size, opts.hidden, opts.embedding, len(a_in_vocab), opts.a_out_vocab_size, \
              n_attrs, n_uniq_attrs, \
-             opts.img_feat_size, q_out_vocab)
+             opts.img_feat_size, q_out_vocab, temperature=opts.temperature)
 
     game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff, memoryless_a=opts.memoryless_a, steps=opts.steps)
     optimizer = core.build_optimizer(game.parameters())
