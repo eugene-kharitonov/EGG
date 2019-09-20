@@ -26,6 +26,36 @@ class LeNet(nn.Module):
         return x
 
 
+class LinearEmb(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = nn.Linear(28*28, 400)
+
+    def forward(self, x):
+        bsz = x.size(0)
+        x = x.view(bsz, -1)
+        x = self.fc(x)
+        return x
+
+
+
+class MlpEmb(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc_1 = nn.Linear(28*28, 400)
+        self.fc_2 = nn.Linear(400, 400)
+
+    def forward(self, x):
+        bsz = x.size(0)
+        x = x.view(bsz, -1)
+
+        x = self.fc_1(x)
+        x = F.leaky_relu(x)
+        x = self.fc_2(x)
+        return x
+
+
+
 class Sender(nn.Module):
     def __init__(self, vocab_size):
         super(Sender, self).__init__()
@@ -41,11 +71,19 @@ class Sender(nn.Module):
 
 
 class Receiver(nn.Module):
-    def __init__(self, vocab_size, n_classes):
+    def __init__(self, vocab_size, n_classes, img_emb_type='lenet'):
         super(Receiver, self).__init__()
         self.message_inp = core.RelaxedEmbedding(vocab_size, 400)
 
-        self.image_inp = LeNet()
+        if img_emb_type == 'lenet':
+            self.image_inp = LeNet()
+        elif img_emb_type == 'linear':
+            self.image_inp = LinearEmb()
+        elif img_emb_type == 'mlp':
+            self.image_inp = MlpEmb()
+        else:
+            assert False
+
         self.fc = nn.Linear(800, n_classes)
 
     def forward(self, message, image):

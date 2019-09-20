@@ -148,7 +148,7 @@ def main(params):
             print('Only mode=rf is supported atm')
             opts.mode = 'rf'
 
-        discriminator = Discriminator(opts.vocab_size, n_hidden=64, embed_dim=64)
+        discriminator = None#Discriminator(opts.vocab_size, n_hidden=64, embed_dim=64)
 
         if opts.sender_cell == 'transformer':
             receiver = Receiver(n_bits=opts.n_bits, n_hidden=opts.receiver_hidden)
@@ -195,7 +195,7 @@ def main(params):
         game=game, optimizer=optimizer,
         train_data=train_loader,
         validation_data=test_loader,
-        callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), EarlyStopperAccuracy(opts.early_stopping_thr)])#, intervention])
+        callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), EarlyStopperAccuracy(opts.early_stopping_thr), intervention])
 
     trainer.train(n_epochs=opts.n_epochs)
 

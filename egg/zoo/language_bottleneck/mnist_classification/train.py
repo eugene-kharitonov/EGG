@@ -31,6 +31,7 @@ def get_params(params):
         help="Number of image rows revealed to Sender (default: 28)")
     parser.add_argument('--receiver_rows', type=int, default=28,
                         help="Number of image rows revealed to Receiver (default: 28)")
+    parser.add_argument('--receiver_type', type=str, choices=['lenet', 'linear', 'mlp'], default='lenet')
     parser.add_argument('--early_stopping_thr', type=float, default=0.98,
                         help="Early stopping threshold on accuracy (defautl: 0.98)")
 
@@ -64,7 +65,7 @@ def main(params):
                                binarize=binarize, receiver_bottom=True)
 
     sender = Sender(vocab_size=opts.vocab_size)
-    receiver = Receiver(vocab_size=opts.vocab_size, n_classes=n_classes)
+    receiver = Receiver(vocab_size=opts.vocab_size, n_classes=n_classes, img_emb_type=opts.receiver_type)
     sender = core.GumbelSoftmaxWrapper(sender, temperature=opts.temperature)
 
     game = core.SymbolGameGS(sender, receiver, diff_loss_symbol)
