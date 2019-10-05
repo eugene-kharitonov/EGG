@@ -14,6 +14,7 @@ import egg.core as core
 from egg.zoo.language_bottleneck.mnist_adv.archs import Sender, Receiver
 from egg.zoo.language_bottleneck.relaxed_channel import AlwaysRelaxedWrapper
 from egg.core import EarlyStopperAccuracy
+from egg.zoo.language_bottleneck.mnist_classification.data import DoubleMnist
 
 
 def diff_loss_symbol(_sender_input, _message, _receiver_input, receiver_output, labels):
@@ -54,12 +55,12 @@ def main(params):
     test_dataset = datasets.MNIST('./data', train=False, download=False,
                    transform=transform)
     n_classes = 10
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=opts.batch_size, shuffle=True, **kwargs)
+    train_loader = DoubleMnist(train_loader, n_classes)
 
-    train_loader = torch.utils.data.DataLoader(train_dataset,
-        batch_size=opts.batch_size, shuffle=True, **kwargs)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=16 * 1024, shuffle=False, **kwargs)
+    test_loader = DoubleMnist(test_loader, n_classes)
 
-    test_loader = torch.utils.data.DataLoader(test_dataset,
-        batch_size=opts.batch_size, shuffle=False, **kwargs)
 
     sender = Sender(vocab_size=opts.vocab_size, linear_channel=opts.linear_channel == 1,
                     softmax_channel=opts.softmax_non_linearity)

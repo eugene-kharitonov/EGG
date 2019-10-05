@@ -12,6 +12,7 @@ import torch.distributions
 import egg.core as core
 
 from egg.zoo.language_bottleneck.mnist_overfit.archs import Sender, Receiver
+from egg.zoo.language_bottleneck.mnist_classification.data import DoubleMnist
 from egg.zoo.language_bottleneck.mnist_overfit.data import corrupt_labels_
 from egg.zoo.language_bottleneck.relaxed_channel import AlwaysRelaxedWrapper
 from egg.core import EarlyStopperAccuracy
@@ -63,15 +64,16 @@ def main(params):
                    transform=transform)
     test_dataset = datasets.MNIST('./data', train=False, download=False,
                    transform=transform)
+
     n_classes = 10
 
     corrupt_labels_(dataset=train_dataset, p_corrupt=opts.p_corrupt, seed=opts.random_seed+1)
 
-    train_loader = torch.utils.data.DataLoader(train_dataset,
-        batch_size=opts.batch_size, shuffle=True, **kwargs)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=opts.batch_size, shuffle=True, **kwargs)
+    train_loader = DoubleMnist(train_loader, n_classes)
 
-    test_loader = torch.utils.data.DataLoader(test_dataset,
-        batch_size=opts.batch_size, shuffle=False, **kwargs)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=16 * 1024, shuffle=False, **kwargs)
+    test_loader = DoubleMnist(test_loader, n_classes)
 
     deeper_alice = opts.deeper_alice == 1 and opts.deeper == 1
     deeper_bob = opts.deeper_alice != 1 and opts.deeper == 1

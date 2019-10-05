@@ -13,7 +13,8 @@ import egg.core as core
 
 from egg.zoo.language_bottleneck.mnist_classification.archs import Sender, Receiver
 from egg.zoo.language_bottleneck.intervention import CallbackEvaluator
-from egg.zoo.language_bottleneck.mnist_classification.data import TakeFirstLoader, SplitImages
+from egg.zoo.language_bottleneck.mnist_classification.data import DoubleMnist, form_classes
+# TakeFirstLoader, SplitImages
 from egg.core import EarlyStopperAccuracy
 
 
@@ -29,11 +30,10 @@ def get_params(params):
                         help="GS temperature for the sender (default: 1)")
     parser.add_argument('--sender_rows', type=int, default=28,
         help="Number of image rows revealed to Sender (default: 28)")
-    parser.add_argument('--receiver_rows', type=int, default=28,
-                        help="Number of image rows revealed to Receiver (default: 28)")
-    parser.add_argument('--receiver_type', type=str, choices=['lenet', 'linear', 'mlp'], default='lenet')
     parser.add_argument('--early_stopping_thr', type=float, default=0.98,
                         help="Early stopping threshold on accuracy (defautl: 0.98)")
+    parser.add_argument('--n_labels', type=int, default=10)
+    parser.add_argument('--n_hidden', type=int, default=0)
 
     args = core.init(parser, params=params)
     return args
@@ -43,29 +43,22 @@ def main(params):
     opts = get_params(params)
     print(json.dumps(vars(opts)))
 
+    label_mapping = form_classes(opts.n_labels, opts.random_seed)
+    print('# label mapping', label_mapping.tolist())
+
     kwargs = {'num_workers': 1, 'pin_memory': True} if opts.cuda else {}
     transform = transforms.ToTensor()
 
-    train_loader = torch.utils.data.DataLoader(
-        datasets.MNIST('./data', train=True, download=True,
-           transform=transform),
-           batch_size=opts.batch_size, shuffle=True, **kwargs)
+    train_dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=opts.batch_size, shuffle=True, **kwargs)
+    train_loader = DoubleMnist(train_loader, label_mapping)
 
-    test_loader = torch.utils.data.DataLoader(
-        datasets.MNIST('./data', train=False, transform=transform),
-           batch_size=16 * 1024, shuffle=False, **kwargs)
-
-    n_classes = 10
-
-    binarize = False
-
-    test_loader = SplitImages(TakeFirstLoader(test_loader, n=1), rows_receiver=opts.receiver_rows,
-                              rows_sender=opts.sender_rows, binarize=binarize, receiver_bottom=True)
-    train_loader = SplitImages(train_loader, rows_sender=opts.sender_rows, rows_receiver=opts.receiver_rows,
-                               binarize=binarize, receiver_bottom=True)
+    test_dataset = datasets.MNIST('./data', train=False, transform=transform)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=16 * 1024, shuffle=False, **kwargs)
+    test_loader = DoubleMnist(test_loader, label_mapping)
 
     sender = Sender(vocab_size=opts.vocab_size)
-    receiver = Receiver(vocab_size=opts.vocab_size, n_classes=n_classes, img_emb_type=opts.receiver_type)
+    receiver = Receiver(vocab_size=opts.vocab_size, n_classes=opts.n_labels, n_hidden=opts.n_hidden)#n_classes, img_emb_type=opts.receiver_type)
     sender = core.GumbelSoftmaxWrapper(sender, temperature=opts.temperature)
 
     game = core.SymbolGameGS(sender, receiver, diff_loss_symbol)
@@ -75,7 +68,7 @@ def main(params):
     intervention = CallbackEvaluator(test_loader, device=opts.device, loss=game.loss,
                                      is_gs=True,
                                      var_length=False,
-                                     input_intervention=True)
+                                     input_intervention=False)#True)
 
     trainer = core.Trainer(game=game, optimizer=optimizer, train_data=train_loader,
                            validation_data=test_loader,

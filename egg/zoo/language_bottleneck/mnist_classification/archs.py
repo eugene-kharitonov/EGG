@@ -14,46 +14,16 @@ class LeNet(nn.Module):
         super(LeNet, self).__init__()
         self.conv1 = nn.Conv2d(1, 20, 5, 1)
         self.conv2 = nn.Conv2d(20, 50, 5, 1)
-        self.fc1 = nn.Linear(4*4*50, 400)
+        self.fc1 = nn.Linear(4*11*50, 400)
 
     def forward(self, x):
         x = F.leaky_relu(self.conv1(x))
         x = F.max_pool2d(x, 2, 2)
         x = F.leaky_relu(self.conv2(x))
         x = F.max_pool2d(x, 2, 2)
-        x = x.view(-1, 4*4*50)
+        x = x.view(x.size(0), -1)
         x = F.leaky_relu(self.fc1(x))
         return x
-
-
-class LinearEmb(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc = nn.Linear(28*28, 400)
-
-    def forward(self, x):
-        bsz = x.size(0)
-        x = x.view(bsz, -1)
-        x = self.fc(x)
-        return x
-
-
-
-class MlpEmb(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc_1 = nn.Linear(28*28, 400)
-        self.fc_2 = nn.Linear(400, 400)
-
-    def forward(self, x):
-        bsz = x.size(0)
-        x = x.view(bsz, -1)
-
-        x = self.fc_1(x)
-        x = F.leaky_relu(x)
-        x = self.fc_2(x)
-        return x
-
 
 
 class Sender(nn.Module):
@@ -61,36 +31,40 @@ class Sender(nn.Module):
         super(Sender, self).__init__()
 
         self.vision = LeNet()
+        self.fc_0 = nn.Linear(400, 400)
         self.fc = nn.Linear(400, vocab_size)
 
     def forward(self, x):
         x = self.vision(x)
+        x = self.fc_0(x)
+        x = F.leaky_relu(x)
         x = self.fc(x)
         logits = F.log_softmax(x, dim=1)
         return logits
 
 
 class Receiver(nn.Module):
-    def __init__(self, vocab_size, n_classes, img_emb_type='lenet'):
+    def __init__(self, vocab_size, n_classes, n_hidden=0):
         super(Receiver, self).__init__()
         self.message_inp = core.RelaxedEmbedding(vocab_size, 400)
 
-        if img_emb_type == 'lenet':
-            self.image_inp = LeNet()
-        elif img_emb_type == 'linear':
-            self.image_inp = LinearEmb()
-        elif img_emb_type == 'mlp':
-            self.image_inp = MlpEmb()
-        else:
-            assert False
+        hidden = []
 
-        self.fc = nn.Linear(800, n_classes)
+        for _ in range(n_hidden):
+            hidden.extend([
+                nn.LeakyReLU(),
+                nn.Linear(400, 400),
+            ])
+
+        self.hidden = nn.Sequential(*hidden)
+
+        self.fc = nn.Linear(400, n_classes)
 
     def forward(self, message, image):
-        x_image = self.image_inp(image)
-        x_message = self.message_inp(message)
-
-        x = torch.cat([x_message, x_image], dim=1)
+        x = self.message_inp(message)
+        if self.hidden:
+            x = self.hidden(x)
+        x = F.leaky_relu(x)
         x = self.fc(x)
 
         return torch.log_softmax(x, dim=1)
