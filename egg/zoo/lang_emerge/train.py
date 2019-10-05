@@ -79,7 +79,7 @@ class TemperatureUpdater(core.Callback):
         self.update_frequency = update_frequency
         self.epoch_counter = 0
 
-    def on_epoch_end(self, loss: float, logs: Dict[str, Any] = None):
+    def on_epoch_end(self, loss, logs=None):
         if self.epoch_counter > 0 and self.epoch_counter % self.update_frequency == 0:
             for agent in agents:
                 agent.gs_layer.temperature = max(self.minimum, self.agent.gs_layer.temperature * self.decay)
