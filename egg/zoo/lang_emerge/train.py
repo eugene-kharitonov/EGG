@@ -11,7 +11,7 @@ from egg.zoo.lang_emerge.data import Dataset
 from egg.zoo.lang_emerge.models import AnswerAgent, QuestionAgent, Game
 
 
-def get_params():
+def get_params(params):
     parser = argparse.ArgumentParser()
     parser.add_argument('--hidden', type=int, default=100,
                         help='Size of the hidden layer of the agents (default: 100)')
@@ -39,7 +39,7 @@ def get_params():
     parser.add_argument('--entropy_coeff', type=float, default=1e-1,
                         help='The entropy regularisation coefficient (default: 1e-1)')
 
-    args = core.init(parser)
+    args = core.init(arg_parser=parser, params=params)
     return args
 
 
@@ -86,8 +86,11 @@ class TemperatureUpdater(core.Callback):
         self.epoch_counter += 1
 
 
-if __name__ == "__main__":
-    opts = get_params()
+def main(params):
+    import json
+    opts = get_params(params)
+    print(json.dumps(vars(opts)))
+
     device = torch.device("cuda" if opts.cuda else "cpu")
 
     train_dataset = Dataset('./data/toy64_split_0.8.json',
@@ -150,3 +153,8 @@ if __name__ == "__main__":
     print('*** TRAIN ***')
     dump_dialogs(game, train_loader, device)
     core.close()
+
+
+if __name__ == "__main__":
+    import sys
+    main(sys.argv[1:])
