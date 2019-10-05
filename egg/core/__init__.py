@@ -7,7 +7,7 @@ from .trainers import Trainer
 from .callbacks import Callback, ConsoleLogger, TensorboardLogger, TemperatureUpdater, CheckpointSaver
 from .util import init, get_opts, build_optimizer, dump_sender_receiver, move_to, get_summary_writer, close
 from .early_stopping import EarlyStopperAccuracy
-from .gs_wrappers import (GumbelSoftmaxWrapper,
+from .gs_wrappers import (GumbelSoftmaxWrapper, GumbelSoftmaxLayer,
                           SymbolGameGS, RelaxedEmbedding,
                           RnnSenderGS, RnnReceiverGS,
                           SenderReceiverRnnGS, SymbolReceiverWrapper)

@@ -8,7 +8,7 @@ import torch.utils.data
 import torch.nn.functional as F
 import egg.core as core
 from egg.zoo.lang_emerge.data import Dataset
-from egg.zoo.lang_emerge.models import Answerer, Questioner, Game
+from egg.zoo.lang_emerge.models import AnswerAgent, QuestionAgent, Game
 
 
 def get_params():
@@ -33,6 +33,8 @@ def get_params():
                         type=float, help='Gumbel-Softmax temperature')
     parser.add_argument('--memoryless_a', action='store_true',
                         help='If set, Answer agent becomes memoryless')
+    parser.add_argument('--straight_through', action='store_true',
+                        help='If set, straight-through Gumbel Softmax is used')
 
     parser.add_argument('--entropy_coeff', type=float, default=1e-1,
                         help='The entropy regularisation coefficient (default: 1e-1)')
@@ -97,15 +99,15 @@ if __name__ == "__main__":
     q_task_offset = opts.a_vocab_size + opts.q_vocab_size
     q_listen_offset = opts.a_vocab_size
 
-    q_bot = Questioner(opts.hidden, opts.embedding, q_in_vocab, opts.q_vocab_size, n_preds,
-                       q_task_offset, q_listen_offset, temperature=opts.temperature)
+    q_bot = QuestionAgent(opts.hidden, opts.embedding, q_in_vocab, opts.q_vocab_size, n_preds,
+                       q_task_offset, q_listen_offset, temperature=opts.temperature, straight_thru=opts.straight_through)
 
     n_attrs = train_dataset.attr_val_vocab
     n_uniq_attrs = train_dataset.n_uniq_attrs
 
-    a_bot = Answerer(opts.hidden, opts.embedding, a_in_vocab, opts.a_vocab_size,
+    a_bot = AnswerAgent(opts.hidden, opts.embedding, a_in_vocab, opts.a_vocab_size,
                      n_attrs, n_uniq_attrs,
-                     opts.img_feat_size, opts.q_vocab_size, temperature=opts.temperature)
+                     opts.img_feat_size, opts.q_vocab_size, temperature=opts.temperature, straight_thru=opts.straight_through)
 
     game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff,
                 memoryless_a=opts.memoryless_a, steps=opts.turns)

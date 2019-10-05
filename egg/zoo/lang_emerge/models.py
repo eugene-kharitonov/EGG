@@ -6,6 +6,8 @@ from torch.distributions import Categorical
 import torch.nn.functional as F
 from torch.distributions import RelaxedOneHotCategorical
 
+from egg import core
+
 
 class RelaxedEmbeddingWithOffset(nn.Embedding):
     """
@@ -31,9 +33,9 @@ class RelaxedEmbeddingWithOffset(nn.Embedding):
             return torch.matmul(x, self.weight[offset:offset + x.size(1), :])
 
 
-class Bot(nn.Module):
+class Agent(nn.Module):
     def __init__(self, hidden_size, embed_size, in_vocab_size, out_vocab_size, 
-                temperature=1.0):
+                temperature=1.0, straight_thru=False):
         super().__init__()
 
         self.in_net = RelaxedEmbeddingWithOffset(in_vocab_size, embed_size)
@@ -43,15 +45,16 @@ class Bot(nn.Module):
         self.c_state = None
 
         self.hidden_size = hidden_size
-        self.in_vocab_size = in_vocab_size
-        self.embedding_size = embed_size
-        self.temperature = temperature
+
+        self.gs = core.GumbelSoftmaxLayer(temperature, straight_through=straight_thru)
 
     def reset(self):
         self.h_state = None
         self.c_state = None
 
     def listen(self, input_token, img_embed=None, offset=0):
+        raise NotImplementedError("Use a sublass")
+
         embeds = self.in_net(input_token, offset)
         if img_embed is not None:
             embeds = torch.cat((embeds, img_embed), dim=-1)
@@ -66,23 +69,18 @@ class Bot(nn.Module):
 
     def speak(self):
         logits = self.out_net(self.h_state)
-
-        if not self.training:
-            sample = torch.zeros_like(logits).scatter_(-1, logits.argmax(dim=-1, keepdim=True), 1.0)
-        else:
-            distr = RelaxedOneHotCategorical(logits=logits, temperature=self.temperature)
-            sample = distr.rsample()
+        sample = self.gs(logits)
 
         return sample, Categorical(logits=logits).entropy()
 
 
-class Answerer(Bot):
+class AnswerAgent(Agent):
     def __init__(self, hidden_size, embed_size, in_vocab_size, out_vocab_size,
                 n_attributes,
                 n_uniq_attributes,
                 img_feat_size,
-                q_out_vocab, temperature=1.0):
-        super().__init__(hidden_size, embed_size, in_vocab_size, out_vocab_size, temperature=temperature)
+                q_out_vocab, temperature=1.0, straight_thru=False):
+        super().__init__(hidden_size, embed_size, in_vocab_size, out_vocab_size, temperature=temperature, straight_thru=straight_thru)
 
         rnn_input_size = n_uniq_attributes * img_feat_size + embed_size
 
@@ -104,13 +102,24 @@ class Answerer(Bot):
         embeds = embeds.view(embeds.size(0), -1)
         return embeds
 
+    def listen(self, input_token, img_embed, offset=0):
+        embeds = self.in_net(input_token, offset)
+        embeds = torch.cat((embeds, img_embed), dim=-1)
 
-class Questioner(Bot):
+        if self.h_state is None:
+            batch_size = embeds.size(0)
+            self.h_state = torch.zeros(batch_size, self.hidden_size, device=embeds.device)
+            self.c_state = torch.zeros_like(self.h_state)
+
+        self.h_state, self.c_state = self.rnn(embeds, (self.h_state, self.c_state))
+
+
+class QuestionAgent(Agent):
     def __init__(self, hidden_size, embed_size, in_vocab_size, out_vocab_size,
             n_preds,
             task_offset,
-            listen_offset, temperature):
-        super().__init__(hidden_size, embed_size, in_vocab_size, out_vocab_size, temperature=temperature)
+            listen_offset, temperature, straight_thru=False):
+        super().__init__(hidden_size, embed_size, in_vocab_size, out_vocab_size, temperature=temperature, straight_thru=straight_thru)
 
         self.rnn = nn.LSTMCell(embed_size, hidden_size)
 
@@ -133,6 +142,16 @@ class Questioner(Bot):
             ]
         return predictions
 
+    def listen(self, input_token, offset=0):
+        embeds = self.in_net(input_token, offset)
+
+        if self.h_state is None:
+            batch_size = embeds.size(0)
+            self.h_state = torch.zeros(batch_size, self.hidden_size, device=embeds.device)
+            self.c_state = torch.zeros_like(self.h_state)
+
+        self.h_state, self.c_state = self.rnn(embeds, (self.h_state, self.c_state))
+
 
 class Game(nn.Module):
     def __init__(self, a_bot, q_bot, entropy_coeff, memoryless_a=True, 
@@ -144,9 +163,6 @@ class Game(nn.Module):
         self.q_bot = q_bot
         self.memoryless_a = memoryless_a
         self.entropy_coeff = entropy_coeff
-
-        self.mean_baseline = 0.0
-        self.n_points = 0.0
 
         entropies = []
 
