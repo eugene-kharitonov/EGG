@@ -7,23 +7,28 @@ import torch.nn.functional as F
 from torch.distributions import RelaxedOneHotCategorical
 
 
-def init_lstm(lstm_cell):
-    for name, param in lstm_cell.named_parameters():
-        if 'bias' in name:
-            torch.nn.init.zeros_(param)
-        else:
-            torch.nn.init.xavier_normal_(param)
-
 class RelaxedEmbeddingWithOffset(nn.Embedding):
+    """
+    >>> emb = RelaxedEmbeddingWithOffset(10, 20)
+    >>> q = torch.LongTensor([1, 2, 3])
+    >>> ground_truth = emb(q)
+    >>> lookup = emb(q - 1, offset=1)
+    >>> ground_truth.allclose(lookup)
+    True
+    >>> q_as_one_hot = torch.zeros(3, 10).scatter_(1, q.view(-1, 1), 1)
+    >>> lookup = emb(q_as_one_hot)
+    >>> ground_truth.allclose(lookup)
+    True
+    >>> q_offset_as_one_hot = torch.zeros(3, 7).scatter_(1, (q - 1).view(-1, 1), 1)
+    >>> lookup = emb(q_offset_as_one_hot, offset=1)
+    >>> ground_truth.allclose(lookup)
+    True
+    """
     def forward(self, x, offset=0):
         if isinstance(x, torch.LongTensor) or (torch.cuda.is_available() and isinstance(x, torch.cuda.LongTensor)):
             return F.embedding(x + offset, self.weight, self.padding_idx, self.max_norm, self.norm_type, self.scale_grad_by_freq, self.sparse)
         else:
-            #print('padding', x.size(), self.weight.size())
-            padded = torch.zeros(x.size(0), self.weight.size(0), device=x.device)
-            padded[:, offset:offset+x.size(1)] += x
-            #print('got tensor', x.size(), 'padded to', padded.size())
-            return torch.matmul(padded, self.weight)
+            return torch.matmul(x, self.weight[offset:offset + x.size(1), :])
 
 
 class Bot(nn.Module):
@@ -93,8 +98,6 @@ class Answerer(Bot):
         torch.nn.init.xavier_normal_(self.out_net.weight)
         torch.nn.init.zeros_(self.out_net.bias)
 
-        init_lstm(self.rnn)
-
     def embed_image(self, x):
         # NB: different in the original code; appends ones
         embeds = self.img_net(x)
@@ -119,13 +122,9 @@ class Questioner(Bot):
         self.init_params()
 
     def init_params(self):
-        #torch.nn.init.xavier_normal_(self.predict_net.weight)
-        #torch.nn.init.zeros_(self.predict_net.bias)
         torch.nn.init.xavier_normal_(self.in_net.weight)
         torch.nn.init.xavier_normal_(self.out_net.weight)
         torch.nn.init.zeros_(self.out_net.bias)
-        init_lstm(self.rnn)
-        #init_lstm(self.predict_rnn)
 
     def predict(self, tasks):
         predictions = [
