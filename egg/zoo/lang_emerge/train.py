@@ -81,8 +81,8 @@ class TemperatureUpdater(core.Callback):
 
     def on_epoch_end(self, loss, logs=None):
         if self.epoch_counter > 0 and self.epoch_counter % self.update_frequency == 0:
-            for agent in agents:
-                agent.gs_layer.temperature = max(self.minimum, self.agent.gs_layer.temperature * self.decay)
+            for agent in self.agents:
+                agent.gs.temperature = max(self.minimum, agent.gs.temperature * self.decay)
         self.epoch_counter += 1
 
 
@@ -128,7 +128,7 @@ if __name__ == "__main__":
                 memoryless_a=opts.memoryless_a, steps=opts.turns)
     optimizer = core.build_optimizer(game.parameters())
 
-    updater = TemperatureUpdater([q_bot, a_bot], decay=0.99, minimum=0.5)
+    updater = TemperatureUpdater([q_bot, a_bot], decay=0.99, minimum=1.0)
 
     stopper = core.EarlyStopperAccuracy(
         threshold=1.0, field_name='acc', validation=False)
