@@ -190,7 +190,7 @@ class Game(nn.Module):
         second_match = F.cross_entropy(predictions[1], labels[:, 1], reduction='none')
         entropy = sum(entropies).mean()
 
-        loss = first_match + second_match + self.entropy_coeff * entropy
+        loss = first_match + second_match - self.entropy_coeff * entropy
 
         acc = first_acc * second_acc
 
