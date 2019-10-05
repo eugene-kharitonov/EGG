@@ -18,22 +18,28 @@ def get_params():
     parser.add_argument('--embedding', type=int, default=20,
                         help='Dimensionality of the embedding layer of the agents (default: 20)')
 
-    parser.add_argument('--img_feat_size', default=20, type=int,\
-                            help='Image feature size for each attribute')
+    parser.add_argument('--img_feat_size', default=20, type=int,
+                        help='Image feature size for each attribute')
 
-    parser.add_argument('--q_vocab_size', default=3, type=int, help='Output vocab size for Q-Bot')
-    parser.add_argument('--a_vocab_size', default=4, type=int, help='Output vocab size for A-Bot')
-    parser.add_argument('--inflate', default=1, type=int)
-    parser.add_argument('--turns', default=2, type=int, help='Number of communication turns')
-    parser.add_argument('--temperature', default=1.0, type=float, help='Gumbel-Softmax temperature')
-    parser.add_argument('--memoryless_a', action='store_true', help='If set, Answer agent becomes memoryless')
+    parser.add_argument('--q_vocab_size', default=3, type=int,
+                        help='Output vocab size for Q-Bot')
+    parser.add_argument('--a_vocab_size', default=4, type=int,
+                        help='Output vocab size for A-Bot')
+    parser.add_argument('--inflate', default=10, type=int, help='Inflation rate of the training dataset: each point'
+                        ' is repeated inflate times')
+    parser.add_argument('--turns', default=2, type=int,
+                        help='Number of turns in communication')
+    parser.add_argument('--temperature', default=1.0,
+                        type=float, help='Gumbel-Softmax temperature')
+    parser.add_argument('--memoryless_a', action='store_true',
+                        help='If set, Answer agent becomes memoryless')
 
     parser.add_argument('--entropy_coeff', type=float, default=1e-1,
                         help='The entropy regularisation coefficient (default: 1e-1)')
 
     args = core.init(parser)
-
     return args
+
 
 def dump_dialogs(game, dataloader, device):
     game.eval()
@@ -62,12 +68,13 @@ def dump_dialogs(game, dataloader, device):
             l = f'input: {inp}, task: {dataset.tasks[t]}, communication: {s}, prediction: {p}, label: {label}'
             print(l)
 
+
 if __name__ == "__main__":
     opts = get_params()
     device = torch.device("cuda" if opts.cuda else "cpu")
-    
-    train_dataset = Dataset('./data/toy64_split_0.8.json', mode='train', inflate=opts.inflate)
-    #test_dataset = Dataset('./data/toy64_split_0.8.json', mode='train', inflate=1)
+
+    train_dataset = Dataset('./data/toy64_split_0.8.json',
+                            mode='train', inflate=opts.inflate)
     test_dataset = Dataset('./data/toy64_split_0.8.json', mode='test')
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
@@ -76,48 +83,47 @@ if __name__ == "__main__":
                                                )
 
     test_loader = torch.utils.data.DataLoader(test_dataset,
-                                               batch_size=opts.batch_size,
-                                               shuffle=False
-                                               )
+                                              batch_size=opts.batch_size,
+                                              shuffle=False
+                                              )
 
     assert train_dataset.n_tasks == test_dataset.n_tasks
 
-    task_vocab = ['<T%d>' % ii for ii in range(train_dataset.n_tasks)]
-    q_out_vocab = [chr(ii + 97) for ii in range(opts.q_vocab_size)]
-    a_out_vocab = [chr(ii + 65) for ii in range(opts.a_vocab_size)]
-
-    a_in_vocab =  q_out_vocab + a_out_vocab
-    q_in_vocab = a_out_vocab + q_out_vocab + task_vocab
-
+    a_in_vocab = opts.q_vocab_size + opts.a_vocab_size
+    q_in_vocab = opts.a_vocab_size + opts.q_vocab_size + train_dataset.n_tasks
+    
     n_preds = train_dataset.attr_val_vocab
 
     q_task_offset = opts.a_vocab_size + opts.q_vocab_size
     q_listen_offset = opts.a_vocab_size
 
-    q_bot = Questioner(opts.batch_size, opts.hidden, opts.embedding, len(q_in_vocab), opts.q_vocab_size, n_preds, \
-        q_task_offset, q_listen_offset, temperature=opts.temperature)
-
+    q_bot = Questioner(opts.hidden, opts.embedding, q_in_vocab, opts.q_vocab_size, n_preds,
+                       q_task_offset, q_listen_offset, temperature=opts.temperature)
 
     n_attrs = train_dataset.attr_val_vocab
     n_uniq_attrs = train_dataset.n_uniq_attrs
 
-    a_bot = Answerer(opts.batch_size, opts.hidden, opts.embedding, len(a_in_vocab), opts.a_vocab_size, \
-             n_attrs, n_uniq_attrs, \
-             opts.img_feat_size, q_out_vocab, temperature=opts.temperature)
+    a_bot = Answerer(opts.hidden, opts.embedding, a_in_vocab, opts.a_vocab_size,
+                     n_attrs, n_uniq_attrs,
+                     opts.img_feat_size, opts.q_vocab_size, temperature=opts.temperature)
 
-    game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff, memoryless_a=opts.memoryless_a, steps=opts.turns)
+    game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff,
+                memoryless_a=opts.memoryless_a, steps=opts.turns)
     optimizer = core.build_optimizer(game.parameters())
 
-    stopper = core.EarlyStopperAccuracy(1.0, field_name='acc', validation=False)
+    stopper = core.EarlyStopperAccuracy(
+        threshold=1.0, field_name='acc', validation=False)
     trainer = core.Trainer(game=game, optimizer=optimizer, train_data=train_loader,
                            validation_data=test_loader,
                            callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), stopper])
     trainer.train(n_epochs=opts.n_epochs)
 
+    exit(0)
     print('*** TEST ***')
     dump_dialogs(game, test_loader, device)
 
-    train_dataset = Dataset('./data/toy64_split_0.8.json', mode='train', inflate=1)
+    train_dataset = Dataset(
+        './data/toy64_split_0.8.json', mode='train', inflate=1)
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=opts.batch_size,
                                                shuffle=False
@@ -125,4 +131,3 @@ if __name__ == "__main__":
     print('*** TRAIN ***')
     dump_dialogs(game, train_loader, device)
     core.close()
-

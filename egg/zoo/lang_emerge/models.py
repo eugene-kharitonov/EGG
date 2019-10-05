@@ -32,7 +32,7 @@ class RelaxedEmbeddingWithOffset(nn.Embedding):
 
 
 class Bot(nn.Module):
-    def __init__(self, batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size, 
+    def __init__(self, hidden_size, embed_size, in_vocab_size, out_vocab_size, 
                 temperature=1.0):
         super().__init__()
 
@@ -77,19 +77,19 @@ class Bot(nn.Module):
 
 
 class Answerer(Bot):
-    def __init__(self, batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size,
+    def __init__(self, hidden_size, embed_size, in_vocab_size, out_vocab_size,
                 n_attributes,
                 n_uniq_attributes,
                 img_feat_size,
                 q_out_vocab, temperature=1.0):
-        super().__init__(batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size, temperature=temperature)
+        super().__init__(hidden_size, embed_size, in_vocab_size, out_vocab_size, temperature=temperature)
 
         rnn_input_size = n_uniq_attributes * img_feat_size + embed_size
 
         self.img_net = nn.Embedding(n_attributes, img_feat_size)
         self.rnn = nn.LSTMCell(rnn_input_size, hidden_size)
 
-        self.listen_offset = len(q_out_vocab)
+        self.listen_offset = q_out_vocab
         self.init_params()
 
     def init_params(self):
@@ -106,11 +106,11 @@ class Answerer(Bot):
 
 
 class Questioner(Bot):
-    def __init__(self, batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size,
+    def __init__(self, hidden_size, embed_size, in_vocab_size, out_vocab_size,
             n_preds,
             task_offset,
             listen_offset, temperature):
-        super().__init__(batch_size, hidden_size, embed_size, in_vocab_size, out_vocab_size, temperature=temperature)
+        super().__init__(hidden_size, embed_size, in_vocab_size, out_vocab_size, temperature=temperature)
 
         self.rnn = nn.LSTMCell(embed_size, hidden_size)
 
