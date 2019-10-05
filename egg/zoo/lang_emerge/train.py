@@ -24,7 +24,7 @@ def get_params():
     parser.add_argument('--q_vocab_size', default=3, type=int, help='Output vocab size for Q-Bot')
     parser.add_argument('--a_vocab_size', default=4, type=int, help='Output vocab size for A-Bot')
     parser.add_argument('--inflate', default=1, type=int)
-    parser.add_argument('--steps', default=2, type=int, help='Number of communication turns')
+    parser.add_argument('--turns', default=2, type=int, help='Number of communication turns')
     parser.add_argument('--temperature', default=1.0, type=float, help='Gumbel-Softmax temperature')
     parser.add_argument('--memoryless_a', action='store_true', help='If set, Answer agent becomes memoryless')
 
@@ -105,7 +105,7 @@ if __name__ == "__main__":
              n_attrs, n_uniq_attrs, \
              opts.img_feat_size, q_out_vocab, temperature=opts.temperature)
 
-    game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff, memoryless_a=opts.memoryless_a, steps=opts.steps)
+    game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff, memoryless_a=opts.memoryless_a, steps=opts.turns)
     optimizer = core.build_optimizer(game.parameters())
 
     stopper = core.EarlyStopperAccuracy(1.0, field_name='acc', validation=False)
