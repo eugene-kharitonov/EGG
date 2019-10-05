@@ -193,5 +193,7 @@ class Game(nn.Module):
 
         acc = first_acc * second_acc
 
-        return loss.mean(), {'first_acc': first_acc.mean(), 'second_acc': second_acc.mean(), 
-                                'acc': acc.mean(), 'entropy': entropy}
+        return loss.mean(), {'first_acc': first_acc.mean(), 
+                             'second_acc': second_acc.mean(), 
+                             'acc': acc.mean(), 
+                             'entropy': entropy}
