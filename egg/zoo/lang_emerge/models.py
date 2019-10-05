@@ -1,4 +1,7 @@
-# class defintions for chatbots - questioner and answerer
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import torch
 import torch.nn as nn
@@ -26,6 +29,7 @@ class RelaxedEmbeddingWithOffset(nn.Embedding):
     >>> ground_truth.allclose(lookup)
     True
     """
+
     def forward(self, x, offset=0):
         if isinstance(x, torch.LongTensor) or (torch.cuda.is_available() and isinstance(x, torch.cuda.LongTensor)):
             return F.embedding(x + offset, self.weight, self.padding_idx, self.max_norm, self.norm_type, self.scale_grad_by_freq, self.sparse)
@@ -34,8 +38,8 @@ class RelaxedEmbeddingWithOffset(nn.Embedding):
 
 
 class Agent(nn.Module):
-    def __init__(self, hidden_size, embed_size, in_vocab_size, out_vocab_size, 
-                temperature=1.0, straight_thru=False):
+    def __init__(self, hidden_size, embed_size, in_vocab_size, out_vocab_size,
+                 temperature=1.0, straight_thru=False):
         super().__init__()
 
         self.in_net = RelaxedEmbeddingWithOffset(in_vocab_size, embed_size)
@@ -46,7 +50,8 @@ class Agent(nn.Module):
 
         self.hidden_size = hidden_size
 
-        self.gs = core.GumbelSoftmaxLayer(temperature, straight_through=straight_thru)
+        self.gs = core.GumbelSoftmaxLayer(
+            temperature, straight_through=straight_thru)
 
     def reset(self):
         self.h_state = None
@@ -62,10 +67,12 @@ class Agent(nn.Module):
         # now pass it through rnn
         if self.h_state is None:
             batch_size = embeds.size(0)
-            self.h_state = torch.zeros(batch_size, self.hidden_size, device=embeds.device)
+            self.h_state = torch.zeros(
+                batch_size, self.hidden_size, device=embeds.device)
             self.c_state = torch.zeros_like(self.h_state)
 
-        self.h_state, self.c_state = self.rnn(embeds, (self.h_state, self.c_state))
+        self.h_state, self.c_state = self.rnn(
+            embeds, (self.h_state, self.c_state))
 
     def speak(self):
         logits = self.out_net(self.h_state)
@@ -76,11 +83,12 @@ class Agent(nn.Module):
 
 class AnswerAgent(Agent):
     def __init__(self, hidden_size, embed_size, in_vocab_size, out_vocab_size,
-                n_attributes,
-                n_uniq_attributes,
-                img_feat_size,
-                q_out_vocab, temperature=1.0, straight_thru=False):
-        super().__init__(hidden_size, embed_size, in_vocab_size, out_vocab_size, temperature=temperature, straight_thru=straight_thru)
+                 n_attributes,
+                 n_uniq_attributes,
+                 img_feat_size,
+                 q_out_vocab, temperature=1.0, straight_thru=False):
+        super().__init__(hidden_size, embed_size, in_vocab_size, out_vocab_size,
+                         temperature=temperature, straight_thru=straight_thru)
 
         rnn_input_size = n_uniq_attributes * img_feat_size + embed_size
 
@@ -108,18 +116,21 @@ class AnswerAgent(Agent):
 
         if self.h_state is None:
             batch_size = embeds.size(0)
-            self.h_state = torch.zeros(batch_size, self.hidden_size, device=embeds.device)
+            self.h_state = torch.zeros(
+                batch_size, self.hidden_size, device=embeds.device)
             self.c_state = torch.zeros_like(self.h_state)
 
-        self.h_state, self.c_state = self.rnn(embeds, (self.h_state, self.c_state))
+        self.h_state, self.c_state = self.rnn(
+            embeds, (self.h_state, self.c_state))
 
 
 class QuestionAgent(Agent):
     def __init__(self, hidden_size, embed_size, in_vocab_size, out_vocab_size,
-            n_preds,
-            task_offset,
-            listen_offset, temperature, straight_thru=False):
-        super().__init__(hidden_size, embed_size, in_vocab_size, out_vocab_size, temperature=temperature, straight_thru=straight_thru)
+                 n_preds,
+                 task_offset,
+                 listen_offset, temperature, straight_thru=False):
+        super().__init__(hidden_size, embed_size, in_vocab_size, out_vocab_size,
+                         temperature=temperature, straight_thru=straight_thru)
 
         self.rnn = nn.LSTMCell(embed_size, hidden_size)
 
@@ -139,7 +150,7 @@ class QuestionAgent(Agent):
         predictions = [
             self.predict_net_0(self.h_state),
             self.predict_net_1(self.h_state)
-            ]
+        ]
         return predictions
 
     def listen(self, input_token, offset=0):
@@ -147,15 +158,17 @@ class QuestionAgent(Agent):
 
         if self.h_state is None:
             batch_size = embeds.size(0)
-            self.h_state = torch.zeros(batch_size, self.hidden_size, device=embeds.device)
+            self.h_state = torch.zeros(
+                batch_size, self.hidden_size, device=embeds.device)
             self.c_state = torch.zeros_like(self.h_state)
 
-        self.h_state, self.c_state = self.rnn(embeds, (self.h_state, self.c_state))
+        self.h_state, self.c_state = self.rnn(
+            embeds, (self.h_state, self.c_state))
 
 
 class Game(nn.Module):
-    def __init__(self, a_bot, q_bot, entropy_coeff, memoryless_a=True, 
-            steps=2):
+    def __init__(self, a_bot, q_bot, entropy_coeff, memoryless_a=True,
+                 steps=2):
         super().__init__()
 
         self.steps = steps
@@ -182,7 +195,8 @@ class Game(nn.Module):
 
             self.a_bot.listen(ques, img_embed)
             a_bot_reply, a_entropy = self.a_bot.speak()
-            self.a_bot.listen(a_bot_reply, offset=self.a_bot.listen_offset, img_embed=img_embed)
+            self.a_bot.listen(
+                a_bot_reply, offset=self.a_bot.listen_offset, img_embed=img_embed)
             self.q_bot.listen(a_bot_reply)
 
             dialog.extend([ques.detach(), a_bot_reply.detach()])
@@ -201,15 +215,17 @@ class Game(nn.Module):
         first_acc = (predictions[0].argmax(dim=-1) == labels[:, 0]).float()
         second_acc = (predictions[1].argmax(dim=-1) == labels[:, 1]).float()
 
-        first_match = F.cross_entropy(predictions[0], labels[:, 0], reduction='none')
-        second_match = F.cross_entropy(predictions[1], labels[:, 1], reduction='none')
+        first_match = F.cross_entropy(
+            predictions[0], labels[:, 0], reduction='none')
+        second_match = F.cross_entropy(
+            predictions[1], labels[:, 1], reduction='none')
         entropy = sum(entropies).mean()
 
         loss = first_match + second_match - self.entropy_coeff * entropy
 
         acc = first_acc * second_acc
 
-        return loss.mean(), {'first_acc': first_acc.mean(), 
-                             'second_acc': second_acc.mean(), 
-                             'acc': acc.mean(), 
+        return loss.mean(), {'first_acc': first_acc.mean(),
+                             'second_acc': second_acc.mean(),
+                             'acc': acc.mean(),
                              'entropy': entropy}

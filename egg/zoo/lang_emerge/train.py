@@ -22,9 +22,9 @@ def get_params(params):
                         help='Image feature size for each attribute')
 
     parser.add_argument('--q_vocab_size', default=3, type=int,
-                        help='Output vocab size for Q-Bot')
+                        help='Output vocab size for Question agent')
     parser.add_argument('--a_vocab_size', default=4, type=int,
-                        help='Output vocab size for A-Bot')
+                        help='Output vocab size for Answer agent')
     parser.add_argument('--inflate', default=10, type=int, help='Inflation rate of the training dataset: each point'
                         ' is repeated inflate times')
     parser.add_argument('--turns', default=2, type=int,
@@ -38,6 +38,8 @@ def get_params(params):
 
     parser.add_argument('--entropy_coeff', type=float, default=1e-1,
                         help='The entropy regularisation coefficient (default: 1e-1)')
+    parser.add_argument('--data_path', default="/private/home/kharitonov/work/EGG/egg/zoo/lang_emerge/data/toy64_split_0.8.json",
+                        help='Path to the data')
 
     args = core.init(arg_parser=parser, params=params)
     return args
@@ -82,7 +84,8 @@ class TemperatureUpdater(core.Callback):
     def on_epoch_end(self, loss, logs=None):
         if self.epoch_counter > 0 and self.epoch_counter % self.update_frequency == 0:
             for agent in self.agents:
-                agent.gs.temperature = max(self.minimum, agent.gs.temperature * self.decay)
+                agent.gs.temperature = max(
+                    self.minimum, agent.gs.temperature * self.decay)
         self.epoch_counter += 1
 
 
@@ -93,9 +96,9 @@ def main(params):
 
     device = torch.device("cuda" if opts.cuda else "cpu")
 
-    train_dataset = Dataset('./data/toy64_split_0.8.json',
+    train_dataset = Dataset(opts.data_path,
                             mode='train', inflate=opts.inflate)
-    test_dataset = Dataset('./data/toy64_split_0.8.json', mode='test')
+    test_dataset = Dataset(opts.data_path, mode='test')
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=opts.batch_size,
@@ -111,21 +114,21 @@ def main(params):
 
     a_in_vocab = opts.q_vocab_size + opts.a_vocab_size
     q_in_vocab = opts.a_vocab_size + opts.q_vocab_size + train_dataset.n_tasks
-    
+
     n_preds = train_dataset.attr_val_vocab
 
     q_task_offset = opts.a_vocab_size + opts.q_vocab_size
     q_listen_offset = opts.a_vocab_size
 
     q_bot = QuestionAgent(opts.hidden, opts.embedding, q_in_vocab, opts.q_vocab_size, n_preds,
-                       q_task_offset, q_listen_offset, temperature=opts.temperature, straight_thru=opts.straight_through)
+                          q_task_offset, q_listen_offset, temperature=opts.temperature, straight_thru=opts.straight_through)
 
     n_attrs = train_dataset.attr_val_vocab
     n_uniq_attrs = train_dataset.n_uniq_attrs
 
     a_bot = AnswerAgent(opts.hidden, opts.embedding, a_in_vocab, opts.a_vocab_size,
-                     n_attrs, n_uniq_attrs,
-                     opts.img_feat_size, opts.q_vocab_size, temperature=opts.temperature, straight_thru=opts.straight_through)
+                        n_attrs, n_uniq_attrs,
+                        opts.img_feat_size, opts.q_vocab_size, temperature=opts.temperature, straight_thru=opts.straight_through)
 
     game = Game(a_bot, q_bot, entropy_coeff=opts.entropy_coeff,
                 memoryless_a=opts.memoryless_a, steps=opts.turns)
