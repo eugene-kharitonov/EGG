@@ -71,6 +71,21 @@ def dump_dialogs(game, dataloader, device):
             print(l)
 
 
+class TemperatureUpdater(core.Callback):
+    def __init__(self, agents, decay=0.9, minimum=0.1, update_frequency=1):
+        self.agents = agents
+        self.decay = decay
+        self.minimum = minimum
+        self.update_frequency = update_frequency
+        self.epoch_counter = 0
+
+    def on_epoch_end(self, loss: float, logs: Dict[str, Any] = None):
+        if self.epoch_counter > 0 and self.epoch_counter % self.update_frequency == 0:
+            for agent in agents:
+                agent.gs_layer.temperature = max(self.minimum, self.agent.gs_layer.temperature * self.decay)
+        self.epoch_counter += 1
+
+
 if __name__ == "__main__":
     opts = get_params()
     device = torch.device("cuda" if opts.cuda else "cpu")
@@ -113,11 +128,13 @@ if __name__ == "__main__":
                 memoryless_a=opts.memoryless_a, steps=opts.turns)
     optimizer = core.build_optimizer(game.parameters())
 
+    updater = TemperatureUpdater([q_bot, a_bot], decay=0.99, minimum=0.5)
+
     stopper = core.EarlyStopperAccuracy(
         threshold=1.0, field_name='acc', validation=False)
     trainer = core.Trainer(game=game, optimizer=optimizer, train_data=train_loader,
                            validation_data=test_loader,
-                           callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), stopper])
+                           callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), stopper, updater])
     trainer.train(n_epochs=opts.n_epochs)
 
     exit(0)
