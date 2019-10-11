@@ -71,6 +71,7 @@ if __name__ == '__main__':
 
     jobs = []
 
+<<<<<<< HEAD
     if not args.no_preemption:
         combinations = [
             comb + ['--preemptable', f'--checkpoint_freq={args.checkpoint_freq}'] for comb in combinations]
@@ -89,6 +90,24 @@ if __name__ == '__main__':
     else:
         runner = lambda x: SlurmWrapper(module.main)(x)
         jobs = executor.map_array(runner, combinations)
+=======
+            if not args.preview and not args.dry_run:
+                tries = 0
+                success = False
+                while tries < 3:
+                    try:
+                        job = executor.submit(runner, comb)
+                        success = True
+                        break
+                    except Exception as e:
+                        print(e)
+                        print('Error on start, re-trying')
+                        tries += 1
+                        time.sleep(10 * tries)
+                if not success:
+                    print('Failed to launch')
+                    exit(1)
+>>>>>>> wip
 
         for job, comb in zip(jobs, combinations):
             print(job.job_id, comb)

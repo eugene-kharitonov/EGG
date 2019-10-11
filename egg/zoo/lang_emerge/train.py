@@ -140,7 +140,7 @@ def main(params):
         threshold=1.0, field_name='acc', validation=False)
     trainer = core.Trainer(game=game, optimizer=optimizer, train_data=train_loader,
                            validation_data=test_loader,
-                           callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), stopper, updater])
+                           callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), stopper])#, updater])
     trainer.train(n_epochs=opts.n_epochs)
 
     exit(0)
