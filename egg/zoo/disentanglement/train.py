@@ -311,7 +311,8 @@ def main(params):
             core.RnnReceiverDeterministic(Receiver(n_hidden=opts.receiver_hidden, n_outputs=n_dim),
                     opts.vocab_size + 1, opts.receiver_emb, hidden_size=opts.receiver_hidden, cell='gru')
 
-        for name, receiver_generator in [('transformer', transformer_receiver_generator), ('gru', gru_receiver_generator), ('linear', linear_receiver_generator)]:
+        for name, receiver_generator in [#('transformer', transformer_receiver_generator), 
+                        ('gru', gru_receiver_generator), ('linear', linear_receiver_generator)]:
             for seed in range(17, 17 + 3):
                 _set_seed(seed)
                 accs = retrain_receiver(receiver_generator, frozen_sender)
@@ -330,7 +331,8 @@ def main(params):
                     vocab_size=opts.vocab_size, embed_dim=opts.sender_hidden, max_len=opts.max_len,
                     num_layers=1, num_heads=5, hidden_size=opts.sender_emb, force_eos=False))
 
-        for name, sender_generator in [('transformer', transformer_sender_generator), ('gru', gru_sender_generator)]:
+        for name, sender_generator in [#('transformer', transformer_sender_generator), 
+                    ('gru', gru_sender_generator)]:
             for seed in range(17, 17 + 3):
                 _set_seed(seed)
                 accs = retrain_sender(sender_generator, frozen_receiver)
