@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -39,6 +40,20 @@ class PositionalSender(nn.Module):
         zeros = torch.zeros(x.size(0), x.size(1), device=x.device)
         return message, zeros, zeros
 
+
+class RotatorLenses(nn.Module):
+    def __init__(self, theta):
+        super().__init__()
+
+        cos_theta = math.cos(theta)
+        sin_theta = math.sin(theta)
+
+        self.rotation_matrix = torch.tensor([[cos_theta, -sin_theta], [sin_theta, cos_theta]], requires_grad=False)
+
+    def __call__(self, examples):
+        with torch.no_grad():
+            r = examples.matmul(self.rotation_matrix)
+        return r
 
 if __name__ == '__main__':
     from .dataset import SphereData

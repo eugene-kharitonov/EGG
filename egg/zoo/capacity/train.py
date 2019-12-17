@@ -3,8 +3,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-from egg.zoo.capacity.dataset import SphereData, RotatorLenses
-from egg.zoo.capacity.archs import PositionalSender, Receiver
+from egg.zoo.capacity.dataset import SphereData
+from egg.zoo.capacity.archs import PositionalSender, Receiver, RotatorLenses
 
 import json
 import argparse

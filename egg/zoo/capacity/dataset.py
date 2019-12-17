@@ -26,15 +26,6 @@ class SphereData:
         return self.data[k, :], torch.zeros(1)
 
 
-class RotatorLenses:
-    def __init__(self, theta):
-        cos_theta = math.cos(theta)
-        sin_theta = math.sin(theta)
-
-        self.rotation_matrix = torch.tensor([[cos_theta, -sin_theta], [sin_theta, cos_theta]])
-
-    def __call__(self, examples):
-        return examples.matmul(self.rotation_matrix)#.matmul(examples)
 
 if __name__ == '__main__':
     s = SphereData(n_points=4, n_dim=2)
