@@ -49,6 +49,7 @@ class RotatorLenses(nn.Module):
         sin_theta = math.sin(theta)
 
         self.rotation_matrix = torch.tensor([[cos_theta, -sin_theta], [sin_theta, cos_theta]], requires_grad=False)
+        self.rotation_matrix = nn.Parameter(self.rotation_matrix)
 
     def __call__(self, examples):
         with torch.no_grad():
