@@ -56,6 +56,17 @@ class RotatorLenses(nn.Module):
             r = examples.matmul(self.rotation_matrix)
         return r
 
+
+class PlusOneWrapper(nn.Module):
+    def __init__(self, wrapped):
+        super().__init__()
+        self.wrapped = wrapped
+
+    def forward(self, *input):
+        r1, r2, r3 = self.wrapped(*input)
+        return r1 + 1, r2, r3
+
+
 if __name__ == '__main__':
     from .dataset import SphereData
     from torch.utils.data import DataLoader

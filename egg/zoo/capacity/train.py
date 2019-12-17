@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from egg.zoo.capacity.dataset import SphereData
-from egg.zoo.capacity.archs import PositionalSender, Receiver, RotatorLenses
+from egg.zoo.capacity.archs import PositionalSender, Receiver, RotatorLenses, PlusOneWrapper
 
 import json
 import argparse
@@ -56,10 +56,13 @@ def main(params):
         lense = RotatorLenses(theta=opts.theta * math.pi)
 
     sender = PositionalSender(vocab_size=opts.vocab_size, lense=lense)
+    sender = PlusOneWrapper(sender)
+
     receiver = Receiver(n_hidden=opts.receiver_hidden, n_dim=2)
 
     receiver = core.RnnReceiverDeterministic(
-                receiver, opts.vocab_size, opts.receiver_emb, opts.receiver_hidden, cell=opts.receiver_cell)
+                receiver, opts.vocab_size + 1,  # exclude eos = 0
+                opts.receiver_emb, opts.receiver_hidden, cell=opts.receiver_cell)
     game = core.SenderReceiverRnnReinforce(sender, receiver, diff_loss, receiver_entropy_coeff=0.0, sender_entropy_coeff=0.0)
        
     optimizer = core.build_optimizer(game.parameters())
