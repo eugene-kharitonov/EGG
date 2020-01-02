@@ -67,6 +67,56 @@ class PlusOneWrapper(nn.Module):
         return r1 + 1, r2, r3
 
 
+
+class Mixer2d(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = nn.Linear(2, 2, bias=False)
+    def __call__(self, examples):
+        return self.fc(examples)
+
+
+class Predictor(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = nn.Linear(1, 2)
+    def __call__(self, examples):
+        return self.fc(examples)
+
+
+class Discriminator(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc_1 = nn.Linear(2, 10)
+        self.fc_2 = nn.Linear(10, 10)
+        self.fc_3 = nn.Linear(10, 2)
+
+    def __call__(self, examples):
+        x = self.fc_1(examples)
+        x = F.tanh(x)
+        x = self.fc_2(x)
+        x = F.tanh(x)
+        x = self.fc_3(x)
+        return x
+
+
+
+class GradientReverse(torch.autograd.Function):
+    scale = 1.0
+    @staticmethod
+    def forward(ctx, x):
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return GradientReverse.scale * grad_output.neg()
+    
+def grad_reverse(x, scale=1.0):
+    GradientReverse.scale = scale
+    return GradientReverse.apply(x)
+
+
+
 if __name__ == '__main__':
     from .dataset import SphereData
     from torch.utils.data import DataLoader
