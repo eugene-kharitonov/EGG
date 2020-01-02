@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from egg.zoo.capacity.dataset import SphereData
-from egg.zoo.capacity.archs import PositionalSender, Receiver, RotatorLenses, PlusOneWrapper
+from egg.zoo.capacity.archs import PositionalSender, Receiver, RotatorLenses, PlusOneWrapper, SubspaceSwapLenses
 
 import json
 import argparse
@@ -50,10 +50,11 @@ def main(params):
     test_data = SphereData(n_points=opts.n_examples, n_dim=2)
     test_loader = DataLoader(train_data, batch_size=opts.batch_size)
 
-    if opts.theta is None:
-        lense = None
-    else:
-        lense = RotatorLenses(theta=opts.theta * math.pi)
+    #if opts.theta is None:
+    #    lense = None
+    #else:
+    #    lense = RotatorLenses(theta=opts.theta * math.pi)
+    lense = SubspaceSwapLenses()
 
     sender = PositionalSender(vocab_size=opts.vocab_size, lense=lense)
     sender = PlusOneWrapper(sender)

@@ -56,6 +56,15 @@ class RotatorLenses(nn.Module):
             r = examples.matmul(self.rotation_matrix)
         return r
 
+class SubspaceSwapLenses(nn.Module):
+    def __call__(self, examples):
+        mask_1 = (examples[:, 0] > 0) & (examples[:, 1] > 0)
+        mask_2 = (examples[:, 0] < 0) & (examples[:, 1] < 0)
+
+        examples[mask_1, :].mul_(-1)
+        examples[mask_2, :].mul_(-1)
+
+        return examples
 
 class PlusOneWrapper(nn.Module):
     def __init__(self, wrapped):
