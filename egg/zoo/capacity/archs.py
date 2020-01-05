@@ -81,15 +81,16 @@ class Mixer2d(nn.Module):
     def __init__(self):
         super().__init__()
         self.fc = nn.Linear(2, 2, bias=False)
-    def __call__(self, examples):
+
+    def forward(self, examples):
         return self.fc(examples)
 
 
 class Predictor(nn.Module):
-    def __init__(self):
+    def __init__(self, n_dim=2):
         super().__init__()
-        self.fc = nn.Linear(1, 2)
-    def __call__(self, examples):
+        self.fc = nn.Linear(1, n_dim)
+    def forward(self, examples):
         return self.fc(examples)
 
 

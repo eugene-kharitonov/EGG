@@ -35,6 +35,13 @@ def diff_loss(sender_input, _message, _receiver_input, receiver_output, _labels)
     loss = F.mse_loss(receiver_output, sender_input)
     return loss, {}
 
+# TODO:
+# * separate training/validation loops for the mixer training
+# * fix mixer training wrt all symbols
+# * combine mixers and Decoder training
+#  ** do Decoder arch vs comprehended models / multi-depth models / multi-depth Mixers / languages and pos/bos disents
+# * some better datasets? d_sprite / attribute-values
+# 
 
 def main(params):
     import math

@@ -18,8 +18,8 @@ from torch.utils.data import DataLoader
 def get_params(params):
     print(params)
     parser = argparse.ArgumentParser()
-    parser.add_argument('--n_examples', type=int, default=1000,
-                        help='Number of examples seen in an epoch (default: 1000)')
+    parser.add_argument('--n_examples', type=int, default=10000,
+                        help='Number of examples seen in an epoch (default: 10000)')
     parser.add_argument('--receiver_hidden', type=int, default=10,
                         help='Size of the hidden layer of Receiver (default: 10)')
 
@@ -36,6 +36,39 @@ def diff_loss(sender_input, _message, _receiver_input, receiver_output, _labels)
     return loss, {}
 
 
+class WrapperModule(torch.nn.Module):
+    def __init__(self, mixer, unmixer, n_dim=2):
+        super().__init__()
+
+        self.mixer = mixer
+        self.unmixer = unmixer
+
+        self.predictors = torch.nn.ModuleList(
+            Predictor(n_dim) for _ in range(n_dim)
+        )
+
+    def forward(self, points):
+        mixed = self.mixer(points)
+        unmixed = self.unmixer(mixed)
+        recovery_loss = F.mse_loss(points, unmixed)
+
+        norm = mixed.pow(2.0).sum(-1)
+        norm_loss = (norm - 1.0).clamp(min=0).sum()
+
+        mixing_loss = 0
+        for i, p in enumerate(self.predictors):
+            predicted = p(mixed[:, i].unsqueeze(-1))
+            # NB: only 2D
+            loss_predict_0 = F.mse_loss(points[:, 0], predicted[:, 0])
+            loss_predict_1 = F.mse_loss(points[:, 1], predicted[:, 1])
+            mixing_loss = mixing_loss + (loss_predict_0 - loss_predict_1).abs()
+
+        loss = recovery_loss + norm_loss + mixing_loss
+        return loss
+
+def train_epoch(train_loader, optimizer, model, use_cuda):
+    pass
+
 def main(params):
     import math
 
@@ -47,30 +80,19 @@ def main(params):
     train_data = SphereData(n_points=opts.n_examples, n_dim=2)
     train_loader = DataLoader(train_data, batch_size=opts.batch_size)
 
-    test_data = SphereData(n_points=opts.n_examples, n_dim=2)
-    test_loader = DataLoader(train_data, batch_size=opts.batch_size)
-
     mixer = Mixer2d()
     unmixer = Mixer2d()
-    predictor_1 = Predictor()
+
+    wrapper = WrapperModule(mixer, unmixer)
 
     if opts.cuda:
-        mixer.cuda()
-        unmixer.cuda()
+        wrapper.cuda()
 
-
-    params = []
-    params.extend(mixer.parameters())
-    params.extend(unmixer.parameters())
-    params.extend(predictor_1.parameters())
-
+    params = wrapper.parameters()
     optimizer = core.build_optimizer(params)
     
-# TODO:
-# infinite example stream
-
-
     for epoch in range(opts.n_epochs):
+
         for points, _ in train_loader:
             n_batch = points.size(0)
 
@@ -78,23 +100,12 @@ def main(params):
                 points = points.cuda()
 
             optimizer.zero_grad()
+            loss = wrapper(points)
 
-            mixed = mixer(points)
-            unmixed = unmixer(mixed)
-            recovery_loss = F.mse_loss(points, unmixed)
-
-            norm = mixed.pow(2.0).sum(-1)
-            norm_loss = (norm - 1.0).clamp(min=0).sum()
-
-            predicted_x = predictor_1(mixed[:, :1])
-            loss_predict_0 = F.mse_loss(points[:, 0], predicted_x[:, 0])
-            loss_predict_1 = F.mse_loss(points[:, 1], predicted_x[:, 1])
-
-            loss = recovery_loss + norm_loss + loss_predict_0 + loss_predict_1 + (loss_predict_0 - loss_predict_1).abs()
             loss.backward()
             optimizer.step()
 
-        print(recovery_loss.detach(), norm_loss.detach(), loss_predict_0.detach())
+        print(loss.detach())
 
     core.close()
     import math
