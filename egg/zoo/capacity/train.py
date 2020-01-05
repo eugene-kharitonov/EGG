@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from egg.zoo.capacity.dataset import SphereData
-from egg.zoo.capacity.archs import PositionalSender, Receiver, RotatorLenses, PlusOneWrapper, SubspaceSwapLenses
+from egg.zoo.capacity.archs import PositionalSender, Receiver, RotatorLenses, PlusOneWrapper, SubspaceSwapLenses, Mixer2d, WrapperModule
 
 import json
 import argparse
@@ -12,6 +12,7 @@ import torch.utils.data
 import torch.nn.functional as F
 import egg.core as core
 from torch.utils.data import DataLoader
+import math
 
 
 def get_params(params):
@@ -21,13 +22,16 @@ def get_params(params):
                         help='Number of examples seen in an epoch (default: 1000)')
     parser.add_argument('--receiver_hidden', type=int, default=10,
                         help='Size of the hidden layer of Receiver (default: 10)')
-    parser.add_argument('--theta', type=float, default=None)
-
     parser.add_argument('--receiver_cell', type=str, default='rnn')
     parser.add_argument('--receiver_emb', type=int, default=10,
                         help='Size of the embeddings of Receiver (default: 10)')
+    parser.add_argument('--no_mixer', action='store_true')
+    parser.add_argument('--inner_layers', type=int, default=-1)
+    parser.add_argument('--mixer_epochs', type=int, default=10)
 
     args = core.init(arg_parser=parser, params=params)
+    assert args.inner_layers >= -1
+
     return args
 
 
@@ -35,19 +39,32 @@ def diff_loss(sender_input, _message, _receiver_input, receiver_output, _labels)
     loss = F.mse_loss(receiver_output, sender_input)
     return loss, {}
 
-# TODO:
-# * separate training/validation loops for the mixer training
-# * fix mixer training wrt all symbols
-# * combine mixers and Decoder training
-#  ** do Decoder arch vs comprehended models / multi-depth models / multi-depth Mixers / languages and pos/bos disents
-# * some better datasets? d_sprite / attribute-values
-# 
+
+def train_mixer(train_loader, mixer, unmixer, use_cuda, n_epochs):
+    wrapper = WrapperModule(mixer, unmixer)
+
+    if use_cuda:
+        wrapper.cuda()
+
+    params = wrapper.parameters()
+    optimizer = torch.optim.Adam(params, lr=1e-2)
+    
+    for epoch in range(n_epochs):
+        for points, _ in train_loader:
+            n_batch = points.size(0)
+
+            if use_cuda: points = points.cuda()
+
+            optimizer.zero_grad()
+            loss = wrapper(points)
+
+            loss.backward()
+            optimizer.step()
+        print(f"# Mixer train: epoch {epoch}, loss {loss.detach()}")
 
 def main(params):
-    import math
-
     opts = get_params(params)
-    print(opts)#json.dumps(vars(opts)))
+    print(opts)
 
     device = opts.device
 
@@ -57,13 +74,16 @@ def main(params):
     test_data = SphereData(n_points=opts.n_examples, n_dim=2)
     test_loader = DataLoader(train_data, batch_size=opts.batch_size)
 
-    #if opts.theta is None:
-    #    lense = None
-    #else:
-    #    lense = RotatorLenses(theta=opts.theta * math.pi)
-    lense = SubspaceSwapLenses()
+    all_data = torch.utils.data.ConcatDataset([train_data, test_data])
+    all_loader = DataLoader(all_data, batch_size=opts.batch_size)
 
-    sender = PositionalSender(vocab_size=opts.vocab_size, lense=lense)
+    mixer = None#RotatorLenses(math.pi * 0.25)
+    if not opts.no_mixer:
+        mixer, unmixer = Mixer2d(inner_layers=opts.inner_layers), Mixer2d(inner_layers=opts.inner_layers)
+        train_mixer(all_loader, mixer, unmixer, opts.cuda, n_epochs=opts.mixer_epochs)
+        print(mixer)
+
+    sender = PositionalSender(vocab_size=opts.vocab_size, lense=mixer)
     sender = PlusOneWrapper(sender)
 
     receiver = Receiver(n_hidden=opts.receiver_hidden, n_dim=2)

@@ -8,22 +8,25 @@ import torch.utils.data as data
 import torch.nn.parallel
 import torch
 import numpy as np
+import math
 
 
 class SphereData:
     def __init__(self, n_points, n_dim):
-        data = torch.randn(size=(n_points, n_dim))
-        data = data / data.pow(2.0).sum(dim=-1, keepdim=True).sqrt()
+        assert n_dim == 2
 
-        assert data[0].pow(2.0).sum().isclose(torch.tensor(1.0))
+        radii = torch.FloatTensor(n_points, 1).uniform_(0, 1)
+        angle = torch.FloatTensor(n_points, 1).uniform_(0, 2 * math.pi)
 
-        self.data = data
+        data_xy = torch.cat([torch.cos(angle), torch.sin(angle)], dim=1) * radii
+        self.data_xy = data_xy
+        self.data_ar = torch.cat([angle, radii], dim=1)
 
     def __len__(self):
-        return self.data.size(0)
+        return self.data_xy.size(0)
 
     def __getitem__(self, k):
-        return self.data[k, :], torch.zeros(1)
+        return self.data_xy[k, :], self.data_ar[k, :]
 
 
 
