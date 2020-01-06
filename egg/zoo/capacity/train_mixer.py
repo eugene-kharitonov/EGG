@@ -5,7 +5,7 @@
 
 from egg.zoo.capacity.dataset import SphereData
 from egg.zoo.capacity.archs import PositionalSender, Receiver, RotatorLenses, \
-    PlusOneWrapper, Mixer2d, Discriminator, grad_reverse, Predictor
+    PlusOneWrapper, Mixer2d, Discriminator, grad_reverse, Predictor, WrapperModule
 
 import json
 import argparse
@@ -31,73 +31,20 @@ def get_params(params):
     return args
 
 
-def diff_loss(sender_input, _message, _receiver_input, receiver_output, _labels):
-    loss = F.mse_loss(receiver_output, sender_input)
-    return loss, {}
-
-
-class WrapperModule(torch.nn.Module):
-    def __init__(self, mixer, unmixer, n_dim=2):
-        super().__init__()
-
-        self.mixer = mixer
-        self.unmixer = unmixer
-
-        self.predictors = torch.nn.ModuleList(
-            Predictor(n_dim) for _ in range(n_dim)
-        )
-
-    def forward(self, points):
-        mixed = self.mixer(points)
-        unmixed = self.unmixer(mixed)
-        recovery_loss = F.mse_loss(points, unmixed)
-
-        norm = mixed.pow(2.0).sum(-1)
-        norm_loss = (norm - 1.0).clamp(min=0).sum()
-
-        mixing_loss = 0
-        for i, p in enumerate(self.predictors):
-            predicted = p(mixed[:, i].unsqueeze(-1))
-            # NB: only 2D
-            loss_predict_0 = F.mse_loss(points[:, 0], predicted[:, 0])
-            loss_predict_1 = F.mse_loss(points[:, 1], predicted[:, 1])
-            mixing_loss = mixing_loss + (loss_predict_0 - loss_predict_1).abs()
-
-        loss = recovery_loss + norm_loss + mixing_loss
-        return loss
-
-def train_epoch(train_loader, optimizer, model, use_cuda):
-    pass
-
-def main(params):
-    import math
-
-    opts = get_params(params)
-    print(opts)#json.dumps(vars(opts)))
-
-    device = opts.device
-
-    train_data = SphereData(n_points=opts.n_examples, n_dim=2)
-    train_loader = DataLoader(train_data, batch_size=opts.batch_size)
-
-    mixer = Mixer2d()
-    unmixer = Mixer2d()
-
+def train_mixer(train_loader, mixer, unmixer, use_cuda, n_epochs):
     wrapper = WrapperModule(mixer, unmixer)
 
-    if opts.cuda:
+    if use_cuda:
         wrapper.cuda()
 
     params = wrapper.parameters()
     optimizer = core.build_optimizer(params)
     
-    for epoch in range(opts.n_epochs):
-
+    for epoch in range(n_epochs):
         for points, _ in train_loader:
             n_batch = points.size(0)
 
-            if opts.cuda:
-                points = points.cuda()
+            if use_cuda: points = points.cuda()
 
             optimizer.zero_grad()
             loss = wrapper(points)
@@ -107,15 +54,24 @@ def main(params):
 
         print(loss.detach())
 
-    core.close()
+def main(params):
     import math
 
-    print(mixer.fc.weight)
-    print(unmixer.fc.weight)
+    opts = get_params(params)
+    print(opts)#json.dumps(vars(opts)))
+
+    train_data = SphereData(n_points=opts.n_examples, n_dim=2)
+    train_loader = DataLoader(train_data, batch_size=opts.batch_size)
+
+    mixer = Mixer2d()
+    unmixer = Mixer2d()
+
+    train_mixer(train_loader, mixer, unmixer, opts.cuda, opts.n_epochs)
+    import math
 
     w = mixer.fc.weight
-    print(math.atan2(w[0,1], w[0,0]) / math.pi)
 
+    print(math.atan2(w[0,1], w[0,0]) / math.pi)
     print(torch.matmul(mixer.fc.weight, unmixer.fc.weight))
 
 if __name__ == "__main__":

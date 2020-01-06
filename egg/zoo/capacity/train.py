@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from egg.zoo.capacity.dataset import SphereData
-from egg.zoo.capacity.archs import PositionalSender, Receiver, RotatorLenses, PlusOneWrapper, SubspaceSwapLenses, Mixer2d, WrapperModule
+from egg.zoo.capacity.archs import PositionalSender, Receiver, ReflectorLenses, RotatorLenses, PlusOneWrapper, SubspaceSwapLenses, Mixer2d, WrapperModule
 
 import json
 import argparse
@@ -77,11 +77,22 @@ def main(params):
     all_data = torch.utils.data.ConcatDataset([train_data, test_data])
     all_loader = DataLoader(all_data, batch_size=opts.batch_size)
 
-    mixer = None#RotatorLenses(math.pi * 0.25)
+    #mixer = RotatorLenses(math.pi * 0.25)
+    rotate = RotatorLenses(math.pi * 0.25)
+    rotate_small = RotatorLenses(math.pi * 0.125)
+    reflect_x = ReflectorLenses('x')
+    reflect_y = ReflectorLenses('y')
+
+    x = torch.zeros(2, 2).uniform_(0, 1)
+
+    print(x, reflect_x(x), reflect_y(x))
+
+    mixer = torch.nn.Sequential(reflect_x, rotate_small, reflect_y, rotate_small, reflect_x)
+
     if not opts.no_mixer:
-        mixer, unmixer = Mixer2d(inner_layers=opts.inner_layers), Mixer2d(inner_layers=opts.inner_layers)
+        _mixer, unmixer = Mixer2d(inner_layers=opts.inner_layers), Mixer2d(inner_layers=opts.inner_layers)
         train_mixer(all_loader, mixer, unmixer, opts.cuda, n_epochs=opts.mixer_epochs)
-        print(mixer)
+    print(mixer)
 
     sender = PositionalSender(vocab_size=opts.vocab_size, lense=mixer)
     sender = PlusOneWrapper(sender)

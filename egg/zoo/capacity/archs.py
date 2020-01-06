@@ -57,6 +57,22 @@ class RotatorLenses(nn.Module):
             r = examples.matmul(self.rotation_matrix)
         return r
 
+class ReflectorLenses(nn.Module):
+    def __init__(self, mode):
+        super().__init__()
+        self.mode = mode
+
+    def __call__(self, examples):
+        copy = examples.clone()
+        if self.mode == 'x':
+            copy[:, 0] = -examples[:, 0]
+        elif self.mode == 'y':
+            copy[:, 1] = -examples[:, 1]
+        else:
+            assert False
+        return copy
+
+
 class SubspaceSwapLenses(nn.Module):
     def __call__(self, examples):
         mask_1 = (examples[:, 0] > 0) & (examples[:, 1] > 0)
@@ -174,7 +190,7 @@ class WrapperModule(torch.nn.Module):
         d_loss = F.cross_entropy(d_predictions, labels)
 
 
-        loss = recovery_loss + 10 * d_loss + mixing_loss
+        loss = recovery_loss #+ 10 * d_loss + mixing_loss
         return loss
 
 if __name__ == '__main__':
