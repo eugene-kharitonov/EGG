@@ -114,6 +114,105 @@ class Mixer2d(nn.Module):
         return self.fc(examples)
 
 
+class _MixerDiscrete(nn.Module):
+    def __init__(self, n_attributes, n_values):
+        super().__init__()
+        self.fc = nn.Linear(n_attributes * n_values, n_attributes * n_values, bias=False)
+        self.gs = core.GumbelSoftmaxLayer()
+
+        self.n_attributes = n_attributes
+        self.n_values = n_values
+        
+    def forward(self, x):
+        batch_size = x.size(0)
+        x = self.fc(x)
+        x = x.view(batch_size, self.n_attributes, self.n_values)
+        x = self.gs(x)
+        x = x.view(batch_size, self.n_attributes * self.n_values)
+        return x
+
+
+class MixerDiscrete(nn.Module):
+    def __init__(self, n_attributes, n_values):
+        super().__init__()
+        self.fc_1 = nn.Linear(n_attributes * n_values, n_attributes * n_values)#100)
+        self.fc_2 = nn.Linear(100, n_attributes * n_values)
+        self.gs = core.GumbelSoftmaxLayer()
+
+        self.n_attributes = n_attributes
+        self.n_values = n_values
+        
+    def forward(self, inp):
+        batch_size = inp.size(0)
+        inp_a = inp.view(batch_size, self.n_attributes, self.n_values)
+
+        x = self.fc_1(inp)
+        #x = F.leaky_relu(x)
+        #x = self.fc_2(x)
+
+        n = x.size(-1)
+
+        x_a = x.view(batch_size, self.n_attributes, self.n_values)
+        x_a = self.gs(x_a)
+
+        added = torch.zeros_like(inp_a)
+
+        for a in range(self.n_attributes):
+            for i in range(self.n_values):
+                for j in range(self.n_values):
+                    target_value = (i + j) % self.n_values
+                    added[:, a, target_value] = x_a[:, a, i] + inp_a[:, a, j] - x_a[:, a, i] * inp_a[:, a, j]
+
+        return added.view(batch_size, n)
+
+
+
+class UnMixerDiscrete(nn.Module):
+    def __init__(self, n_attributes, n_values):
+        super().__init__()
+        self.fc_1 = nn.Linear(n_attributes * n_values, 100)
+        self.fc_2 = nn.Linear(100, 100)
+        self.fc_3 = nn.Linear(100, n_attributes * n_values)
+
+        self.n_attributes = n_attributes
+        self.n_values = n_values
+        
+    def forward(self, x):
+        batch_size = x.size(0)
+        x = self.fc_1(x)
+        x = F.leaky_relu(x)
+        x = self.fc_2(x)
+        x = F.leaky_relu(x)
+        x = self.fc_3(x)
+
+        x = x.view(batch_size, self.n_attributes, self.n_values)
+        x = x.softmax(dim=-1)
+        x = x.view(batch_size, self.n_attributes * self.n_values)
+
+        return x
+
+class Mixer2d(nn.Module):
+    def __init__(self, inner_layers=-1):
+        super().__init__()
+        if inner_layers == -1:
+            self.fc = nn.Linear(2, 2, bias=False)
+        else:
+            l = [nn.Linear(2, 10)]
+            for _ in range(inner_layers):
+                l.extend([
+                    nn.Tanh(),
+                    nn.Linear(10, 10)
+                ])
+
+            l += [nn.Tanh(), nn.Linear(10, 2)]
+            self.fc = nn.Sequential(*l)
+
+    def forward(self, examples):
+        return self.fc(examples)
+
+
+
+
 class Predictor(nn.Module):
     def __init__(self, n_dim=2):
         super().__init__()
@@ -191,6 +290,25 @@ class WrapperModule(torch.nn.Module):
 
 
         loss = recovery_loss #+ 10 * d_loss + mixing_loss
+        return loss
+
+
+
+
+class DiscreteWrapperModule(torch.nn.Module):
+    def __init__(self, mixer, unmixer, n_dim=2):
+        super().__init__()
+
+        self.mixer = mixer
+        self.unmixer = unmixer
+
+    def forward(self, x):
+        mixed = self.mixer(x)
+        unmixed = self.unmixer(mixed)
+
+        recovery_loss = F.binary_cross_entropy(unmixed, x)
+
+        loss = recovery_loss
         return loss
 
 if __name__ == '__main__':

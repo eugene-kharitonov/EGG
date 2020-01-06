@@ -9,6 +9,7 @@ import torch.nn.parallel
 import torch
 import numpy as np
 import math
+import itertools
 
 
 class SphereData:
@@ -30,5 +31,36 @@ class SphereData:
 
 
 
+
+def enumerate_attribute_value(n_attributes, n_values):
+    iters = [range(n_values) for _ in range(n_attributes)]
+
+    return list(itertools.product(*iters))
+
+
+def one_hotify(data, n_attributes, n_values):
+    r = []
+    for config in data:
+        z = torch.zeros((n_attributes, n_values))
+        for i in range(n_attributes):
+            z[i, config[i]] = 1
+        r.append(z.view(-1))
+    return r
+
+class AttributeValueData:
+    def __init__(self, n_attributes, n_values):
+        self.data = [torch.LongTensor(k) for k in enumerate_attribute_value(n_attributes, n_values)]
+        self.data = one_hotify(self.data, n_attributes, n_values)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, k):
+        return self.data[k]
+    
+
 if __name__ == '__main__':
-    s = SphereData(n_points=4, n_dim=2)
+    #s = SphereData(n_points=4, n_dim=2)
+
+    for b in AttributeValueData(4, 4):
+        print(b)

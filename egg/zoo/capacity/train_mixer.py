@@ -3,9 +3,9 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-from egg.zoo.capacity.dataset import SphereData
+from egg.zoo.capacity.dataset import SphereData, AttributeValueData
 from egg.zoo.capacity.archs import PositionalSender, Receiver, RotatorLenses, \
-    PlusOneWrapper, Mixer2d, Discriminator, grad_reverse, Predictor, WrapperModule
+    PlusOneWrapper, Mixer2d, Predictor, WrapperModule, MixerDiscrete, DiscreteWrapperModule, UnMixerDiscrete
 
 import json
 import argparse
@@ -32,16 +32,17 @@ def get_params(params):
 
 
 def train_mixer(train_loader, mixer, unmixer, use_cuda, n_epochs):
-    wrapper = WrapperModule(mixer, unmixer)
+    wrapper = DiscreteWrapperModule(mixer, unmixer)
 
     if use_cuda:
         wrapper.cuda()
+    wrapper.train()
 
     params = wrapper.parameters()
     optimizer = core.build_optimizer(params)
     
     for epoch in range(n_epochs):
-        for points, _ in train_loader:
+        for points in train_loader:
             n_batch = points.size(0)
 
             if use_cuda: points = points.cuda()
@@ -60,19 +61,27 @@ def main(params):
     opts = get_params(params)
     print(opts)#json.dumps(vars(opts)))
 
-    train_data = SphereData(n_points=opts.n_examples, n_dim=2)
+    train_data = AttributeValueData(n_attributes=2, n_values=3)
     train_loader = DataLoader(train_data, batch_size=opts.batch_size)
 
-    mixer = Mixer2d()
-    unmixer = Mixer2d()
+    mixer = torch.nn.Sequential(
+        MixerDiscrete(n_attributes=2, n_values=3),
+        MixerDiscrete(n_attributes=2, n_values=3),
+        #MixerDiscrete(n_attributes=2, n_values=3),
+        #MixerDiscrete(n_attributes=2, n_values=3),
+        #MixerDiscrete(n_attributes=2, n_values=3)
+    )
+
+    unmixer = UnMixerDiscrete(n_attributes=2, n_values=3)
 
     train_mixer(train_loader, mixer, unmixer, opts.cuda, opts.n_epochs)
-    import math
 
-    w = mixer.fc.weight
+    mixer.eval()
 
-    print(math.atan2(w[0,1], w[0,0]) / math.pi)
-    print(torch.matmul(mixer.fc.weight, unmixer.fc.weight))
+    for points in train_loader:
+        print(points)
+        print(mixer(points))
+
 
 if __name__ == "__main__":
     import sys
