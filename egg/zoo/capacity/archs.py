@@ -135,9 +135,13 @@ class _MixerDiscrete(nn.Module):
 class MixerDiscrete(nn.Module):
     def __init__(self, n_attributes, n_values):
         super().__init__()
-        self.fc_1 = nn.Linear(n_attributes * n_values, n_attributes * n_values)#100)
-        self.fc_2 = nn.Linear(100, n_attributes * n_values)
-        self.gs = core.GumbelSoftmaxLayer()
+        n = (n_attributes - 1) * n_values
+        self.fc_1 = nn.Linear(n_values, n_values)#100)
+        #self.fc_2 = nn.Linear(100, 100)
+        #self.fc_3 = nn.Linear(100, n_values)#, bias=False)
+
+        self.n = n
+        self.gs = core.GumbelSoftmaxLayer(temperature=1.0, straight_through=True)
 
         self.n_attributes = n_attributes
         self.n_values = n_values
@@ -146,44 +150,72 @@ class MixerDiscrete(nn.Module):
         batch_size = inp.size(0)
         inp_a = inp.view(batch_size, self.n_attributes, self.n_values)
 
-        x = self.fc_1(inp)
-        #x = F.leaky_relu(x)
+        #x = inp_a[:, 1:, :].view(batch_size, self.n)
+        #x = self.fc_1(x)
+        #x = F.tanh(x)
         #x = self.fc_2(x)
-
-        n = x.size(-1)
-
-        x_a = x.view(batch_size, self.n_attributes, self.n_values)
-        x_a = self.gs(x_a)
+        #x = F.tanh(x)
+        #x = self.fc_3(x)
+        #x = #self.fc_1(inp_a[:, 0, :] + inp_a[:, 1, :])
+        #x = self.gs(x)
+        #print(x)
+        #x = mul_one_hots(inp_a[:, 1, :], inp_a[:, 1, :])
+        #print(inp_a[:, 0, :])
 
         added = torch.zeros_like(inp_a)
+        added[:, :-1, :] = inp_a[:, 1:, :]
 
-        for a in range(self.n_attributes):
-            for i in range(self.n_values):
-                for j in range(self.n_values):
-                    target_value = (i + j) % self.n_values
-                    added[:, a, target_value] = x_a[:, a, i] + inp_a[:, a, j] - x_a[:, a, i] * inp_a[:, a, j]
+        added[:, -1, :] = sum_one_hots(inp_a[:, 0, :], inp_a[:, 1, :])
+        #added[:, -1, :] = mul_one_hots(inp_a[:, 0, :], inp_a[:, 0, :])
+        return added.view(batch_size, self.n_attributes * self.n_values)
 
-        return added.view(batch_size, n)
 
+def sum_one_hots(a, b):
+    assert a.size() == b.size()
+    n_values = a.size(-1)
+
+    added = torch.zeros_like(a)
+
+    for i in range(n_values):
+        for j in range(n_values):
+            target_value = (i + j) % n_values
+            added[:, target_value] += a[:, i] * b[:, j]
+    return added
+
+
+def mul_one_hots(a, b):
+    assert a.size() == b.size()
+    n_values = a.size(-1)
+
+    mul = torch.zeros_like(a)
+
+    for i in range(n_values):
+        for j in range(n_values):
+            target_value = (i * j) % n_values
+            mul[:, target_value] += a[:, i] * b[:, j]
+    return mul
 
 
 class UnMixerDiscrete(nn.Module):
-    def __init__(self, n_attributes, n_values):
+    def __init__(self, n_attributes, n_values, inner_layers=-1):
         super().__init__()
-        self.fc_1 = nn.Linear(n_attributes * n_values, 100)
-        self.fc_2 = nn.Linear(100, 100)
-        self.fc_3 = nn.Linear(100, n_attributes * n_values)
+        n = n_attributes * n_values 
+        if inner_layers == -1:
+            self.net = nn.Linear(n, n)
+        else:
+            l = [nn.Linear(n, 100), nn.LeakyReLU()]
+            for _ in range(inner_layers):
+                l += [nn.Linear(100, 100), nn.LeakyReLU()]
+            l += [nn.Linear(100, n)]
+
+            self.net = nn.Sequential(*l)
 
         self.n_attributes = n_attributes
         self.n_values = n_values
         
     def forward(self, x):
         batch_size = x.size(0)
-        x = self.fc_1(x)
-        x = F.leaky_relu(x)
-        x = self.fc_2(x)
-        x = F.leaky_relu(x)
-        x = self.fc_3(x)
+        x = self.net(x)
 
         x = x.view(batch_size, self.n_attributes, self.n_values)
         x = x.softmax(dim=-1)
@@ -289,7 +321,7 @@ class WrapperModule(torch.nn.Module):
         d_loss = F.cross_entropy(d_predictions, labels)
 
 
-        loss = recovery_loss #+ 10 * d_loss + mixing_loss
+        loss = mixing_loss #recovery_loss #+ 10 * d_loss + mixing_loss
         return loss
 
 
@@ -307,9 +339,8 @@ class DiscreteWrapperModule(torch.nn.Module):
         unmixed = self.unmixer(mixed)
 
         recovery_loss = F.binary_cross_entropy(unmixed, x)
-
         loss = recovery_loss
-        return loss
+        return loss# * 0.0
 
 if __name__ == '__main__':
     from .dataset import SphereData

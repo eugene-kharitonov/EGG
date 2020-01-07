@@ -26,8 +26,14 @@ def get_params(params):
     parser.add_argument('--receiver_cell', type=str, default='rnn')
     parser.add_argument('--receiver_emb', type=int, default=10,
                         help='Size of the embeddings of Receiver (default: 10)')
+    parser.add_argument('--unmixer_inner', type=int, default=-1)
+    parser.add_argument('--mixers', type=int, default=1)
+
 
     args = core.init(arg_parser=parser, params=params)
+    assert args.unmixer_inner >= -1
+    assert args.mixers >= 1
+
     return args
 
 
@@ -61,26 +67,23 @@ def main(params):
     opts = get_params(params)
     print(opts)#json.dumps(vars(opts)))
 
-    train_data = AttributeValueData(n_attributes=2, n_values=3)
+    n_a, n_v = 3, 2
+    train_data = AttributeValueData(n_attributes=n_a, n_values=n_v)
     train_loader = DataLoader(train_data, batch_size=opts.batch_size)
 
     mixer = torch.nn.Sequential(
-        MixerDiscrete(n_attributes=2, n_values=3),
-        MixerDiscrete(n_attributes=2, n_values=3),
-        #MixerDiscrete(n_attributes=2, n_values=3),
-        #MixerDiscrete(n_attributes=2, n_values=3),
-        #MixerDiscrete(n_attributes=2, n_values=3)
+        *(MixerDiscrete(n_attributes=n_a, n_values=n_v) for _ in range(opts.mixers))
     )
 
-    unmixer = UnMixerDiscrete(n_attributes=2, n_values=3)
+    unmixer = UnMixerDiscrete(n_attributes=n_a, n_values=n_v, inner_layers=opts.unmixer_inner)
 
     train_mixer(train_loader, mixer, unmixer, opts.cuda, opts.n_epochs)
 
     mixer.eval()
 
     for points in train_loader:
-        print(points)
-        print(mixer(points))
+        print(points)#[0:1, :])
+        print(mixer(points))#[0:1, :]))
 
 
 if __name__ == "__main__":
