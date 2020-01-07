@@ -18,8 +18,28 @@ class Receiver(nn.Module):
         self.fc = nn.Linear(n_hidden, n_dim)
 
     def forward(self, x, _):
-        x = self.fc(x)
+        x = self.fc(x).softmax(dim=-1)
         return x
+
+class DiscretePositionalSender(nn.Module):
+    def __init__(self, n_attributes, n_values, lense=None):
+        super().__init__()
+        self.lense = lense
+        self.n_attributes = n_attributes
+        self.n_values = n_values
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        assert x.size(1) == self.n_attributes * self.n_values
+
+        if self.lense:
+            with torch.no_grad():
+                x = self.lense(x)
+
+        message = x.view(batch_size, self.n_attributes, self.n_values).argmax(dim=-1) + 1  # to avoid eosing
+        zeros = torch.zeros(x.size(0), x.size(1), device=x.device)
+        return message, zeros, zeros
+
 
 class PositionalSender(nn.Module):
     def __init__(self, vocab_size, lense=None):

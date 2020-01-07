@@ -56,7 +56,7 @@ class AttributeValueData:
         return len(self.data)
 
     def __getitem__(self, k):
-        return self.data[k]
+        return self.data[k], torch.zeros(1)
     
 
 if __name__ == '__main__':
