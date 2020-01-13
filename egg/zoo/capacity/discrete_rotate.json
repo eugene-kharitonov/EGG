@@ -1,0 +1,14 @@
+{
+    "vocab_size" : [50],
+    "batch_size" : [32],
+    "n_epochs": [200],
+    "random_seed": [0, 1, 2, 3, 4, 5],
+    "receiver_hidden": [50, 150],
+    "receiver_emb": [50],
+    "receiver_cell": ["transformer"],
+    "mixers": [0, 1],
+    "receiver_layers": [-1, 0, 1],
+    "cell_layers": [2, 5, 10],
+    "n_a": [2],
+    "n_v": [11]
+}
