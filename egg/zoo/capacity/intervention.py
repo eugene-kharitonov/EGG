@@ -14,7 +14,7 @@ def ask_sender(n_attributes, n_values, dataset, sender, device):
     for i in range(len(dataset)):
         meaning = dataset[i]
 
-        attribute = meaning.view(n_attributes, n_values).argmax(dim=-1)
+        attribute = meaning#.view(n_attributes, n_values).argmax(dim=-1)
         attributes.append(attribute)
         meanings.append(meaning.to(device))
 

@@ -12,13 +12,68 @@ from torch.distributions import Bernoulli
 import egg.core as core
 
 
+class LinearReceiver(nn.Module):
+    def __init__(self, n_outputs, vocab_size, max_length):
+        super().__init__()
+        self.max_length = max_length
+        self.vocab_size = vocab_size
+
+        self.fc = nn.Linear(vocab_size * max_length, n_outputs)
+
+        self.diagonal_embedding = nn.Embedding(vocab_size, vocab_size)
+        nn.init.eye_(self.diagonal_embedding.weight)
+
+    def forward(self, x, *rest):
+        with torch.no_grad():
+            x = self.diagonal_embedding(x).view(x.size(0), -1)
+
+        result = self.fc(x)
+
+        zeros = torch.zeros(x.size(0), device=x.device)
+        return result, zeros, zeros
+
+
+class NonLinearReceiver(nn.Module):
+    def __init__(self, n_outputs, vocab_size, n_hidden, max_length):
+        super().__init__()
+        self.max_length = max_length
+        self.vocab_size = vocab_size
+
+        self.fc_1 = nn.Linear(vocab_size * max_length, n_hidden)
+        self.fc_2 = nn.Linear(n_hidden, n_outputs)
+
+        self.diagonal_embedding = nn.Embedding(vocab_size, vocab_size)
+        nn.init.eye_(self.diagonal_embedding.weight)
+
+    def forward(self, x, *rest):
+        with torch.no_grad():
+            x = self.diagonal_embedding(x).view(x.size(0), -1)
+
+        x = self.fc_1(x)
+        x = F.leaky_relu(x)
+        x = self.fc_2(x)
+
+        zeros = torch.zeros(x.size(0), device=x.device)
+        return x, zeros, zeros
+
+
+
 class Receiver(nn.Module):
-    def __init__(self, n_hidden, n_dim):
+    def __init__(self, n_hidden, n_dim, inner_layers=-1):
         super(Receiver, self).__init__()
-        self.fc = nn.Linear(n_hidden, n_dim)
+        if inner_layers == -1:
+            self.net = nn.Linear(n_hidden, n_dim)
+        else:
+            l = [nn.Linear(n_hidden, n_hidden), nn.LeakyReLU()]
+
+            for _ in range(inner_layers):
+                l += [nn.Linear(n_hidden, n_hidden), nn.LeakyReLU()]
+            l.append(nn.Linear(n_hidden, n_dim))
+
+            self.net = nn.Sequential(*l)
 
     def forward(self, x, _):
-        x = self.fc(x).softmax(dim=-1)
+        x = self.net(x)
         return x
 
 class DiscretePositionalSender(nn.Module):
@@ -28,16 +83,39 @@ class DiscretePositionalSender(nn.Module):
         self.n_attributes = n_attributes
         self.n_values = n_values
 
+        self.diagonal_embedding = nn.Embedding(n_values, n_values)
+        nn.init.eye_(self.diagonal_embedding.weight)
+
     def forward(self, x):
         batch_size = x.size(0)
-        assert x.size(1) == self.n_attributes * self.n_values
+        #assert x.size(1) == self.n_attributes * self.n_values
 
-        if self.lense:
-            with torch.no_grad():
-                x = self.lense(x)
+        #if self.lense:
+        #    with torch.no_grad():
+        #        x = self.lense(x)
 
-        message = x.view(batch_size, self.n_attributes, self.n_values).argmax(dim=-1) + 1  # to avoid eosing
-        zeros = torch.zeros(x.size(0), x.size(1), device=x.device)
+        message = self.diagonal_embedding(x).long() #.argmax(dim=-1)
+        print(x, message)
+        assert message.size(1) == 2
+
+        #message[:, 0] = (message[:, 0] * 7).fmod(self.n_values)
+        #message[:, 1] = (message[:, 0] * 3).fmod(self.n_values)
+
+
+
+        tail = torch.zeros(batch_size, 1).long().to(x.device)
+        message = torch.cat([message + 1, tail], dim=1)
+        #message[:, 0], message[:, 1] = (message[:, 0] + message[:, 1]) % self.n_values, (message[:, 0] - message[:, 1] + self.n_values) % self.n_values,  
+
+        #do_swap = (message[:, 0] < 2) + (message[:, 1] < 2)
+        #do_swap += (message[:, 0] > 2) * (message[:, 1] > 2)
+        #do_swap = (do_swap > 0).long()
+        #do_swap = 0
+        # * (message[:, 1] == 2).long()
+        #message[:, 0], message[:, 1] = message[:, 0] * (1 - do_swap) + do_swap * message[:, 1],  \
+        #    message[:, 1] * (1 - do_swap) + do_swap * message[:, 0]
+
+        zeros = torch.zeros(message.size(0), message.size(1), device=x.device)
         return message, zeros, zeros
 
 
@@ -151,8 +229,25 @@ class _MixerDiscrete(nn.Module):
         x = x.view(batch_size, self.n_attributes * self.n_values)
         return x
 
-
 class MixerDiscrete(nn.Module):
+    def __init__(self, n_attributes, n_values):
+        super().__init__()
+
+        self.n_attributes = n_attributes
+        self.n_values = n_values
+        
+    def forward(self, inp):
+        batch_size = inp.size(0)
+
+        added = torch.zeros_like(inp).long()
+        added[:, 1] = (inp[:, 0] + inp[:, 1]).fmod(self.n_values)
+        added[:, 0] = (self.n_values + inp[:, 0] - inp[:, 1]).fmod(self.n_values) #inp[:, 1]#(inp[:, 0] - inp[:, 1] + self.n_values) % self.n_values
+
+        #added[:, 2:] = inp[:, 2:]
+
+        return added
+
+class _MixerDiscrete(nn.Module):
     def __init__(self, n_attributes, n_values):
         super().__init__()
         n = (n_attributes - 1) * n_values
@@ -186,7 +281,7 @@ class MixerDiscrete(nn.Module):
         added[:, :-1, :] = inp_a[:, 1:, :]
 
         added[:, -1, :] = sum_one_hots(inp_a[:, 0, :], inp_a[:, 1, :])
-        #added[:, -1, :] = mul_one_hots(inp_a[:, 0, :], inp_a[:, 0, :])
+        #added[:, -1, :] = mul_one_hots(inp_a[:, 0, :], inp_a[:, 1, :])
         return added.view(batch_size, self.n_attributes * self.n_values)
 
 
@@ -214,6 +309,37 @@ def mul_one_hots(a, b):
             target_value = (i * j) % n_values
             mul[:, target_value] += a[:, i] * b[:, j]
     return mul
+
+
+
+class DiagonalSwapDiscrete(nn.Module):
+    def __init__(self, n_attributes, n_values):
+        super().__init__()
+
+        self.n_attributes = n_attributes
+        self.n_values = n_values
+        
+    def forward(self, inp):
+        batch_size = inp.size(0)
+        #inp_a = inp.view(batch_size, self.n_attributes, self.n_values)
+        inp_argmax = inp#_a.argmax(dim=-1)
+
+        #upper_right = ((inp_argmax >= self.n_values / 2).sum(dim=-1) == 2)
+        #lower_left = ((inp_argmax <= self.n_values / 2).sum(dim=-1) == 2)
+
+        #inp_argmax[upper_right, :] = self.n_values - inp_argmax[upper_right, :] - 1
+        #inp_argmax[lower_left, :] = self.n_values - inp_argmax[lower_left, :] - 1
+
+        upper = inp_argmax[:, 1] >= self.n_values / 2
+        inp_argmax[upper, 0] = self.n_values - inp_argmax[upper, 0] - 1
+
+        right = inp_argmax[:, 0] >= self.n_values / 2
+        inp_argmax[right, 1] = self.n_values - inp_argmax[right, 1] - 1
+
+
+        #print(inp_argmax)
+        return inp_argmax
+
 
 
 class UnMixerDiscrete(nn.Module):
