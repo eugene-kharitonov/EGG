@@ -4,7 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from egg.zoo.capacity.dataset import SphereData
-from egg.zoo.capacity.archs import PositionalSender, Receiver, ReflectorLenses, RotatorLenses, PlusOneWrapper, SubspaceSwapLenses, Mixer2d, WrapperModule
+from egg.zoo.capacity.archs import ArithmeticSender, Receiver, ReflectorLenses, RotatorLenses, PlusOneWrapper, SubspaceSwapLenses, Mixer2d, WrapperModule
 
 import json
 import argparse
@@ -28,6 +28,8 @@ def get_params(params):
     parser.add_argument('--no_mixer', action='store_true')
     parser.add_argument('--inner_layers', type=int, default=-1)
     parser.add_argument('--mixer_epochs', type=int, default=10)
+
+    parser.add_argument('--language', type=str, choices=['identity', 'arithmetic'])
 
     args = core.init(arg_parser=parser, params=params)
     assert args.inner_layers >= -1
@@ -94,7 +96,7 @@ def main(params):
         train_mixer(all_loader, mixer, unmixer, opts.cuda, n_epochs=opts.mixer_epochs)
     print(mixer)
 
-    sender = PositionalSender(vocab_size=opts.vocab_size, lense=mixer)
+    sender = ArithmeticSender(vocab_size=opts.vocab_size, lense=mixer)
     sender = PlusOneWrapper(sender)
 
     receiver = Receiver(n_hidden=opts.receiver_hidden, n_dim=2)

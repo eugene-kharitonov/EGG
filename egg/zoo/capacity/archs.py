@@ -3,11 +3,14 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import random
+import itertools
 import math
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Bernoulli
+from torch.distributions import Bernoulli, Categorical
 
 import egg.core as core
 
@@ -57,6 +60,54 @@ class NonLinearReceiver(nn.Module):
         return x, zeros, zeros
 
 
+class PositionalScrambler(nn.Module):
+    def __init__(self):
+        super(PositionalScrambler, self).__init__()
+        self.scrambler = None
+
+    def forward(self, x):
+        assert self.scrambler is None or self.scrambler.size(0) == x[0].size(1)
+
+        if self.scrambler is None:
+            assert self.scrambler is None
+
+            n = x[0].size(1)
+            self.scrambler = torch.randperm(n)
+
+        return x[0][:, self.scrambler], x[1], x[2]
+
+
+
+
+class VocabScrambler(nn.Module):
+    def __init__(self, base):
+        super(VocabScrambler, self).__init__()
+
+        self.scrambler = None 
+        self.base = base
+
+    def forward(self, x):
+        positions = x[0].size(1)
+        if self.scrambler is None:
+            self.scrambler = [
+                1 + torch.randperm(self.base + 1).to(x[0].device) for _ in range(positions)
+            ]
+
+        result = []
+        for p in range(positions - 1):
+            result.append(
+                #torch.index_select(input=self.scrambler[p], dim=0, index=x[0][:, p])
+                self.scrambler[p][x[0][:, p]].unsqueeze(1)
+            )
+
+        # eos
+        result.append(x[0][:, -1].unsqueeze(-1))
+
+        result = torch.cat(result, dim=1)
+        #print(result.size())
+        #exit(0)
+        return result, x[1], x[2]
+
 
 class Receiver(nn.Module):
     def __init__(self, n_hidden, n_dim, inner_layers=-1):
@@ -76,158 +127,217 @@ class Receiver(nn.Module):
         x = self.net(x)
         return x
 
-class DiscretePositionalSender(nn.Module):
-    def __init__(self, n_attributes, n_values, lense=None):
+
+class ReceiverRandomized(nn.Module):
+    def __init__(self, n_hidden, n_a, n_v, inner_layers=-1):
+        super(Receiver, self).__init__()
+        if inner_layers == -1:
+            self.net = nn.Linear(n_hidden, n_dim)
+        else:
+            l = [nn.Linear(n_hidden, n_hidden), nn.LeakyReLU()]
+
+            for _ in range(inner_layers):
+                l += [nn.Linear(n_hidden, n_hidden), nn.LeakyReLU()]
+            l.append(nn.Linear(n_hidden, n_a * n_v))
+
+            self.net = nn.Sequential(*l)
+
+        self.n_a, self.n_v = n_a, n_v
+    def forward(self, x, _):
+        x = self.net(x)
+        b = x.size(0)
+        x = x.view(b, self.n_a, self.n_v)
+
+        d = Categorical(logits=x)
+
+        if self.training:
+            sample = d.sample()
+        else:
+            sample = x.argmax(dim=-1)
+        log_probs = d.log_prob(sample)
+        entropy = d.entropy()
+
+        print(log_probs.size(), entropy.size(())
+        exit(0)
+
+        return sample
+
+
+class IdentitySender(nn.Module):
+    def __init__(self, n_attributes, n_values):
         super().__init__()
-        self.lense = lense
         self.n_attributes = n_attributes
         self.n_values = n_values
 
-        self.diagonal_embedding = nn.Embedding(n_values, n_values)
-        nn.init.eye_(self.diagonal_embedding.weight)
-
     def forward(self, x):
         batch_size = x.size(0)
-        #assert x.size(1) == self.n_attributes * self.n_values
 
-        #if self.lense:
-        #    with torch.no_grad():
-        #        x = self.lense(x)
-
-        message = self.diagonal_embedding(x).long() #.argmax(dim=-1)
-        print(x, message)
+        message = x
         assert message.size(1) == 2
-
-        #message[:, 0] = (message[:, 0] * 7).fmod(self.n_values)
-        #message[:, 1] = (message[:, 0] * 3).fmod(self.n_values)
-
-
 
         tail = torch.zeros(batch_size, 1).long().to(x.device)
         message = torch.cat([message + 1, tail], dim=1)
-        #message[:, 0], message[:, 1] = (message[:, 0] + message[:, 1]) % self.n_values, (message[:, 0] - message[:, 1] + self.n_values) % self.n_values,  
-
-        #do_swap = (message[:, 0] < 2) + (message[:, 1] < 2)
-        #do_swap += (message[:, 0] > 2) * (message[:, 1] > 2)
-        #do_swap = (do_swap > 0).long()
-        #do_swap = 0
-        # * (message[:, 1] == 2).long()
-        #message[:, 0], message[:, 1] = message[:, 0] * (1 - do_swap) + do_swap * message[:, 1],  \
-        #    message[:, 1] * (1 - do_swap) + do_swap * message[:, 0]
 
         zeros = torch.zeros(message.size(0), message.size(1), device=x.device)
         return message, zeros, zeros
 
 
-class PositionalSender(nn.Module):
-    def __init__(self, vocab_size, lense=None):
+class ArithmeticSender(nn.Module):
+    def __init__(self, n_attributes, n_values, base):
         super().__init__()
-        self.vocab_size = vocab_size
-        self.lense = lense
-
-    def forward(self, x):
-        batch_size = x.size(0)
-
-        if self.lense:
-            with torch.no_grad():
-                x = self.lense(x)
-
-        assert (x >= -1).all() and (x <= 1).all(), f'max {x.max()}, min {x.min()}'
-        message = ((x + 1) / 2 * (self.vocab_size - 1)).round().long()
-        assert (message < self.vocab_size).all()
-
-        zeros = torch.zeros(x.size(0), x.size(1), device=x.device)
-        return message, zeros, zeros
-
-
-class RotatorLenses(nn.Module):
-    def __init__(self, theta):
-        super().__init__()
-
-        cos_theta = math.cos(theta)
-        sin_theta = math.sin(theta)
-
-        self.rotation_matrix = torch.tensor([[cos_theta, -sin_theta], [sin_theta, cos_theta]], requires_grad=False)
-        self.rotation_matrix = nn.Parameter(self.rotation_matrix)
-
-    def __call__(self, examples):
-        with torch.no_grad():
-            r = examples.matmul(self.rotation_matrix)
-        return r
-
-class ReflectorLenses(nn.Module):
-    def __init__(self, mode):
-        super().__init__()
-        self.mode = mode
-
-    def __call__(self, examples):
-        copy = examples.clone()
-        if self.mode == 'x':
-            copy[:, 0] = -examples[:, 0]
-        elif self.mode == 'y':
-            copy[:, 1] = -examples[:, 1]
-        else:
-            assert False
-        return copy
-
-
-class SubspaceSwapLenses(nn.Module):
-    def __call__(self, examples):
-        mask_1 = (examples[:, 0] > 0) & (examples[:, 1] > 0)
-        mask_2 = (examples[:, 0] < 0) & (examples[:, 1] < 0)
-
-        examples[mask_1, :].mul_(-1)
-        examples[mask_2, :].mul_(-1)
-
-        return examples
-
-class PlusOneWrapper(nn.Module):
-    def __init__(self, wrapped):
-        super().__init__()
-        self.wrapped = wrapped
-
-    def forward(self, *input):
-        r1, r2, r3 = self.wrapped(*input)
-        return r1 + 1, r2, r3
-
-
-
-class Mixer2d(nn.Module):
-    def __init__(self, inner_layers=-1):
-        super().__init__()
-        if inner_layers == -1:
-            self.fc = nn.Linear(2, 2, bias=False)
-        else:
-            l = [nn.Linear(2, 10)]
-            for _ in range(inner_layers):
-                l.extend([
-                    nn.Tanh(),
-                    nn.Linear(10, 10)
-                ])
-
-            l += [nn.Tanh(), nn.Linear(10, 2)]
-            self.fc = nn.Sequential(*l)
-
-    def forward(self, examples):
-        return self.fc(examples)
-
-
-class _MixerDiscrete(nn.Module):
-    def __init__(self, n_attributes, n_values):
-        super().__init__()
-        self.fc = nn.Linear(n_attributes * n_values, n_attributes * n_values, bias=False)
-        self.gs = core.GumbelSoftmaxLayer()
-
         self.n_attributes = n_attributes
         self.n_values = n_values
-        
+        self.base = base
+
+        log = 0
+        k = 1
+
+        while k < n_values:
+            k *= base
+            log += 1
+
+        self.mapping = nn.Embedding(n_values, log)
+        torch.nn.init.zeros_(self.mapping.weight)
+
+        for i in range(n_values):
+            value = i
+            for k in range(log):
+                self.mapping.weight[i, k] = value % base
+                value = value // base
+
+        assert (self.mapping.weight < base).all()
+
     def forward(self, x):
         batch_size = x.size(0)
-        x = self.fc(x)
-        x = x.view(batch_size, self.n_attributes, self.n_values)
-        x = self.gs(x)
-        x = x.view(batch_size, self.n_attributes * self.n_values)
-        return x
+        x = x.view(batch_size * self.n_attributes)
+        with torch.no_grad():
+            x = self.mapping(x)
+        x = x.view(batch_size, -1).long()
+
+        zeros = torch.zeros(x.size(0), x.size(1), device=x.device)
+        return x + 1, zeros, zeros
+
+
+class ArithmeticSender2(nn.Module):
+    def __init__(self, n_attributes, n_values, base):
+        super().__init__()
+        self.n_attributes = n_attributes
+        self.n_values = n_values
+        self.base = base
+
+        log = 0
+        k = 1
+
+        while k < n_values:
+            k *= base
+            log += 1
+
+        self.mapping = nn.Embedding(n_values, log)
+        torch.nn.init.zeros_(self.mapping.weight)
+
+        for i in range(n_values):
+            value = i
+            for k in range(log):
+                self.mapping.weight[i, k] = value % base
+                value = value // base
+
+        assert (self.mapping.weight < base).all()
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        #x = x.view(batch_size * self.n_attributes)
+        with torch.no_grad():
+            x = self.mapping(x)
+
+        assert x.size(1) == 2
+
+        for a in range(self.n_attributes):
+            left = (x[:, a, 0] + x[:, a, 1]).fmod(self.base)
+            right = (x[:, a, 0] - x[:, a, 1] + self.base).fmod(self.base)
+            x[:, a, 0] = left
+            x[:, a, 1] = right
+
+        x = x.view(batch_size, -1).long()
+
+        zeros = torch.zeros(x.size(0), x.size(1), device=x.device)
+        return x + 1, zeros, zeros
+
+
+class HashSender(nn.Module):
+    def __init__(self, n_values, base):
+        super().__init__()
+        self.n_values = n_values
+        self.base = base
+
+        log = 0
+        k = 1
+
+        while k < n_values:
+            k *= base
+            log += 1
+
+        all_messages = list(itertools.product(*(range(base) for _ in range(log))))
+        selected = random.sample(all_messages, n_values)
+        selected = torch.tensor(selected).long()
+        selected.requires_grad_ = False
+
+        self.mapping = nn.Embedding(n_values, log)
+        self.mapping.weight[:, :] = selected
+
+        assert (self.mapping.weight < base).all()
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        with torch.no_grad():
+            x = self.mapping(x).long()
+        x = x.view(batch_size, -1).long()
+
+        zeros = torch.zeros(x.size(0), x.size(1), device=x.device)
+        return x + 1, zeros, zeros
+
+class MultiHashSender(nn.Module):
+    def __init__(self, n_attributes, n_values, base):
+        super().__init__()
+        self.n_values = n_values
+        self.n_attributes = n_attributes
+        self.base = base
+
+        log = 0
+        k = 1
+
+        while k < n_values:
+            k *= base
+            log += 1
+
+        self.mappings = nn.ModuleList()
+
+        for a in range(self.n_attributes):
+            all_messages = list(itertools.product(*(range(base) for _ in range(log))))
+            selected = random.sample(all_messages, n_values)
+            selected = torch.tensor(selected).long()
+            selected.requires_grad_ = False
+
+            self.mappings.append(nn.Embedding(n_values, log))
+            self.mappings[-1].weight[:, :] = selected
+
+            assert (self.mappings[-1].weight < base).all()
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        assert self.n_attributes == x.size(1)
+
+        result = []
+        with torch.no_grad():
+            for i in range(self.n_attributes):
+                result.append(
+                    self.mappings[i](x[:, i]).long()
+                )
+        x = torch.cat(result, dim=1)
+        #x = x.view(batch_size, -1).long()
+
+        zeros = torch.zeros(x.size(0), x.size(1), device=x.device)
+        return x + 1, zeros, zeros
+
 
 class MixerDiscrete(nn.Module):
     def __init__(self, n_attributes, n_values):
@@ -241,49 +351,9 @@ class MixerDiscrete(nn.Module):
 
         added = torch.zeros_like(inp).long()
         added[:, 1] = (inp[:, 0] + inp[:, 1]).fmod(self.n_values)
-        added[:, 0] = (self.n_values + inp[:, 0] - inp[:, 1]).fmod(self.n_values) #inp[:, 1]#(inp[:, 0] - inp[:, 1] + self.n_values) % self.n_values
-
-        #added[:, 2:] = inp[:, 2:]
+        added[:, 0] = (self.n_values + inp[:, 0] - inp[:, 1]).fmod(self.n_values)
 
         return added
-
-class _MixerDiscrete(nn.Module):
-    def __init__(self, n_attributes, n_values):
-        super().__init__()
-        n = (n_attributes - 1) * n_values
-        self.fc_1 = nn.Linear(n_values, n_values)#100)
-        #self.fc_2 = nn.Linear(100, 100)
-        #self.fc_3 = nn.Linear(100, n_values)#, bias=False)
-
-        self.n = n
-        self.gs = core.GumbelSoftmaxLayer(temperature=1.0, straight_through=True)
-
-        self.n_attributes = n_attributes
-        self.n_values = n_values
-        
-    def forward(self, inp):
-        batch_size = inp.size(0)
-        inp_a = inp.view(batch_size, self.n_attributes, self.n_values)
-
-        #x = inp_a[:, 1:, :].view(batch_size, self.n)
-        #x = self.fc_1(x)
-        #x = F.tanh(x)
-        #x = self.fc_2(x)
-        #x = F.tanh(x)
-        #x = self.fc_3(x)
-        #x = #self.fc_1(inp_a[:, 0, :] + inp_a[:, 1, :])
-        #x = self.gs(x)
-        #print(x)
-        #x = mul_one_hots(inp_a[:, 1, :], inp_a[:, 1, :])
-        #print(inp_a[:, 0, :])
-
-        added = torch.zeros_like(inp_a)
-        added[:, :-1, :] = inp_a[:, 1:, :]
-
-        added[:, -1, :] = sum_one_hots(inp_a[:, 0, :], inp_a[:, 1, :])
-        #added[:, -1, :] = mul_one_hots(inp_a[:, 0, :], inp_a[:, 1, :])
-        return added.view(batch_size, self.n_attributes * self.n_values)
-
 
 def sum_one_hots(a, b):
     assert a.size() == b.size()
@@ -312,167 +382,6 @@ def mul_one_hots(a, b):
 
 
 
-class DiagonalSwapDiscrete(nn.Module):
-    def __init__(self, n_attributes, n_values):
-        super().__init__()
-
-        self.n_attributes = n_attributes
-        self.n_values = n_values
-        
-    def forward(self, inp):
-        batch_size = inp.size(0)
-        #inp_a = inp.view(batch_size, self.n_attributes, self.n_values)
-        inp_argmax = inp#_a.argmax(dim=-1)
-
-        #upper_right = ((inp_argmax >= self.n_values / 2).sum(dim=-1) == 2)
-        #lower_left = ((inp_argmax <= self.n_values / 2).sum(dim=-1) == 2)
-
-        #inp_argmax[upper_right, :] = self.n_values - inp_argmax[upper_right, :] - 1
-        #inp_argmax[lower_left, :] = self.n_values - inp_argmax[lower_left, :] - 1
-
-        upper = inp_argmax[:, 1] >= self.n_values / 2
-        inp_argmax[upper, 0] = self.n_values - inp_argmax[upper, 0] - 1
-
-        right = inp_argmax[:, 0] >= self.n_values / 2
-        inp_argmax[right, 1] = self.n_values - inp_argmax[right, 1] - 1
-
-
-        #print(inp_argmax)
-        return inp_argmax
-
-
-
-class UnMixerDiscrete(nn.Module):
-    def __init__(self, n_attributes, n_values, inner_layers=-1):
-        super().__init__()
-        n = n_attributes * n_values 
-        if inner_layers == -1:
-            self.net = nn.Linear(n, n)
-        else:
-            l = [nn.Linear(n, 100), nn.LeakyReLU()]
-            for _ in range(inner_layers):
-                l += [nn.Linear(100, 100), nn.LeakyReLU()]
-            l += [nn.Linear(100, n)]
-
-            self.net = nn.Sequential(*l)
-
-        self.n_attributes = n_attributes
-        self.n_values = n_values
-        
-    def forward(self, x):
-        batch_size = x.size(0)
-        x = self.net(x)
-
-        x = x.view(batch_size, self.n_attributes, self.n_values)
-        x = x.softmax(dim=-1)
-        x = x.view(batch_size, self.n_attributes * self.n_values)
-
-        return x
-
-class Mixer2d(nn.Module):
-    def __init__(self, inner_layers=-1):
-        super().__init__()
-        if inner_layers == -1:
-            self.fc = nn.Linear(2, 2, bias=False)
-        else:
-            l = [nn.Linear(2, 10)]
-            for _ in range(inner_layers):
-                l.extend([
-                    nn.Tanh(),
-                    nn.Linear(10, 10)
-                ])
-
-            l += [nn.Tanh(), nn.Linear(10, 2)]
-            self.fc = nn.Sequential(*l)
-
-    def forward(self, examples):
-        return self.fc(examples)
-
-
-
-
-class Predictor(nn.Module):
-    def __init__(self, n_dim=2):
-        super().__init__()
-        self.fc = nn.Linear(1, n_dim)
-    def forward(self, examples):
-        return self.fc(examples)
-
-
-class Discriminator(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc_1 = nn.Linear(2, 20)
-        self.fc_2 = nn.Linear(20, 20)
-        self.fc_3 = nn.Linear(20, 2)
-
-    def forward(self, examples):
-        x = self.fc_1(examples)
-        x = F.tanh(x)
-        x = self.fc_2(x)
-        x = F.tanh(x)
-        x = self.fc_3(x)
-        return x
-
-
-
-class GradientReverse(torch.autograd.Function):
-    scale = 1.0
-    @staticmethod
-    def forward(ctx, x):
-        return x.view_as(x)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return GradientReverse.scale * grad_output.neg()
-    
-def grad_reverse(x, scale=1.0):
-    GradientReverse.scale = scale
-    return GradientReverse.apply(x)
-
-
-
-class WrapperModule(torch.nn.Module):
-    def __init__(self, mixer, unmixer, n_dim=2):
-        super().__init__()
-
-        self.mixer = mixer
-        self.unmixer = unmixer
-
-        self.predictors = torch.nn.ModuleList(
-            Predictor(n_dim) for _ in range(n_dim)
-        )
-
-        self.discriminator = Discriminator()
-
-    def forward(self, points):
-        mixed = self.mixer(points)
-        unmixed = self.unmixer(mixed)
-        recovery_loss = F.mse_loss(points, unmixed)
-
-        mixing_loss = 0
-        for i, p in enumerate(self.predictors):
-            predicted = p(mixed[:, i].unsqueeze(-1))
-            # NB: only 2D
-            loss_predict_0 = F.mse_loss(points[:, 0], predicted[:, 0])
-            loss_predict_1 = F.mse_loss(points[:, 1], predicted[:, 1])
-            mixing_loss = mixing_loss + (loss_predict_0 - loss_predict_1).abs()
-
-        batch_size = points.size(0)
-        combined_batch = torch.cat([points, mixed], dim=0)
-        labels = torch.zeros(2 * batch_size, dtype=torch.long)
-        labels[:batch_size] = 1
-
-        d_predictions = self.discriminator(grad_reverse(combined_batch))
-        d_loss = F.cross_entropy(d_predictions, labels)
-
-
-        loss = mixing_loss #recovery_loss #+ 10 * d_loss + mixing_loss
-        return loss
-
-
-
-
 class DiscreteWrapperModule(torch.nn.Module):
     def __init__(self, mixer, unmixer, n_dim=2):
         super().__init__()
@@ -486,14 +395,4 @@ class DiscreteWrapperModule(torch.nn.Module):
 
         recovery_loss = F.binary_cross_entropy(unmixed, x)
         loss = recovery_loss
-        return loss# * 0.0
-
-if __name__ == '__main__':
-    from .dataset import SphereData
-    from torch.utils.data import DataLoader
-    sender = PositionalSender(vocab_size=100)
-
-    for example in DataLoader(SphereData(n_points=10, n_dim=2), batch_size=1):
-        print(example, sender(example)[0])
-
-
+        return loss
