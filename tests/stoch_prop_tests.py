@@ -25,7 +25,6 @@ def test_multiarm_bandit():
         stoch_context.propagate_loss(loss=loss).backward()
         optimizer.step()
 
-    # should be (0, 0)
     assert log_probs.argmax().eq(0).all()
 
 
@@ -62,10 +61,8 @@ def test_is_policy_gradient():
     log_probs.requires_grad_(True)
 
     stoch_context = StochContext(baseline=False)
-    sample = r_multinomial(log_probs)#.log_softmax(dim=-1))
-    #print(sample)
+    sample = r_multinomial(log_probs.softmax(dim=-1))
     loss_1 = (mean_payouts * sample).sum()
-    #print('payout: ', loss_1)
     stoch_context.propagate_loss(loss=loss_1).backward()
 
     stoch_prop_grad = log_probs.grad
@@ -75,13 +72,10 @@ def test_is_policy_gradient():
     log_probs = torch.randn(1, 5)
     log_probs.requires_grad_(True)
 
-    distr = torch.distributions.Categorical(logits=log_probs)#.log_softmax(dim=-1))
+    distr = torch.distributions.Categorical(logits=log_probs)
     sample = distr.sample()
-    #print(sample)
     sampled_log_prob = distr.log_prob(sample)
 
-    payout = mean_payouts[sample]
-    #print('payout: ', payout)
     loss_2 = sampled_log_prob * mean_payouts[sample]
     loss_2.backward()
 

@@ -7,34 +7,33 @@ from collections import defaultdict
 
 class ReinforcableMultinomial(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, logits):
-        d = torch.distributions.Categorical(logits=logits)
-        logits = (logits - logits.logsumexp(dim=-1, keepdim=True))#.log_softmax(dim=-1)
+    def forward(ctx, probs):
+        d = torch.distributions.Categorical(probs=probs)
+        #logits = (logits - logits.logsumexp(dim=-1, keepdim=True))#.log_softmax(dim=-1)
+        #logits = logits.log_softmax(dim=-1)
         #logits.log_softmax(dim=-1)
         sample = d.sample()
-        losses_storage = torch.zeros(logits.size(0), device=logits.device)
-        ctx.save_for_backward(logits, sample, losses_storage)
+        probs_sampled = probs.gather(-1, sample.unsqueeze(-1))
+
+        losses_storage = torch.zeros(probs.size(0), device=probs.device)
+        ctx.save_for_backward(probs_sampled, sample, losses_storage)
 
         one_hot_sample = torch.zeros_like(
-            logits).scatter_(-1, sample.unsqueeze(1), 1.0)
+            probs).scatter_(-1, sample.unsqueeze(1), 1.0)
 
-        #print('sampled-1 logprobs', d.log_prob(sample), d.logits)
         return one_hot_sample
 
     @staticmethod
-    def backward(ctx, _):
-        logits, sample, loss = ctx.saved_tensors
+    def backward(ctx, _x):
+        probs, sample, loss = ctx.saved_tensors
 
-        #grad = (-1.0 / logits).unsqueeze(-1).expand(sample.size(0), logits.size(0))
-        #grad = torch.zeros_like(logits) 
-
-
+        grad = torch.zeros_like(_x)
+        print(grad.size(), sample.size(), probs.size())
         # expected batch_size x n_logits
-        grad = torch.zeros(sample.size(0), logits.size(1), device=sample.device)
         for i in range(sample.size(0)):
-            grad[i, sample[i]] = -1.0 / logits[i, sample[i]]
+            grad[i, sample[i]] = 1.0 / probs[i]
 
-        print(grad, loss)#.size(), sample.size(), logits.size())
+        #print(grad, loss)#.size(), sample.size(), logits.size())
         #return loss.unsqueeze(1) * grad
         return loss.unsqueeze(1) * grad
 
