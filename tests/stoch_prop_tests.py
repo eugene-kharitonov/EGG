@@ -1,4 +1,4 @@
-from egg.core.stoch_prop import StochContext, r_multinomial
+from egg.core.stoch_prop import StochContext, r_multinomial, ReinforcableCategorical
 
 import torch
 import torch.distributions
@@ -19,7 +19,7 @@ def test_multiarm_bandit():
         randomized_payouts = torch.randn((8, 10)) * 0.5 + mean_payouts
 
         one_hot_actions = r_multinomial(
-            log_probs.log_softmax(dim=-1).expand_as(randomized_payouts))
+            log_probs.softmax(dim=-1).expand_as(randomized_payouts))
         loss = -(one_hot_actions * randomized_payouts).sum(dim=-1)
 
         stoch_context.propagate_loss(loss=loss).backward()
@@ -37,8 +37,8 @@ def test_two_losses():
 
     mean_payouts = torch.tensor([[10, 0, 0, 0, 0]]).float()
 
-    loss_1 = (mean_payouts * r_multinomial(log_probs_1.log_softmax(dim=-1))).sum()
-    loss_2 = (mean_payouts * r_multinomial(log_probs_2.log_softmax(dim=-1))).sum()
+    loss_1 = (mean_payouts * r_multinomial(log_probs_1.softmax(dim=-1))).sum()
+    loss_2 = (mean_payouts * r_multinomial(log_probs_2.softmax(dim=-1))).sum()
 
     stoch_context.propagate_loss(loss_1=loss_1).backward()
     assert log_probs_2.grad is None
@@ -60,8 +60,10 @@ def test_is_policy_gradient():
     log_probs = torch.randn(1, 5)
     log_probs.requires_grad_(True)
 
-    stoch_context = StochContext(baseline=False)
-    sample = r_multinomial(log_probs.softmax(dim=-1))
+    stoch_context = StochContext()
+    d = ReinforcableCategorical(logits=log_probs)
+
+    sample = d.sample()
     loss_1 = (mean_payouts * sample).sum()
     stoch_context.propagate_loss(loss=loss_1).backward()
 
