@@ -130,7 +130,8 @@ class Receiver(nn.Module):
 
 class ReceiverRandomized(nn.Module):
     def __init__(self, n_hidden, n_a, n_v, inner_layers=-1):
-        super(Receiver, self).__init__()
+        super().__init__()
+        n_dim = n_a * n_v
         if inner_layers == -1:
             self.net = nn.Linear(n_hidden, n_dim)
         else:
@@ -143,6 +144,7 @@ class ReceiverRandomized(nn.Module):
             self.net = nn.Sequential(*l)
 
         self.n_a, self.n_v = n_a, n_v
+
     def forward(self, x, _):
         x = self.net(x)
         b = x.size(0)
@@ -154,13 +156,10 @@ class ReceiverRandomized(nn.Module):
             sample = d.sample()
         else:
             sample = x.argmax(dim=-1)
-        log_probs = d.log_prob(sample)
-        entropy = d.entropy()
+        log_probs = d.log_prob(sample).sum(dim=-1)
+        entropy = d.entropy().sum(dim=-1)
 
-        print(log_probs.size(), entropy.size(())
-        exit(0)
-
-        return sample
+        return sample, log_probs, entropy
 
 
 class IdentitySender(nn.Module):
@@ -173,7 +172,7 @@ class IdentitySender(nn.Module):
         batch_size = x.size(0)
 
         message = x
-        assert message.size(1) == 2
+        #assert message.size(1) == 2
 
         tail = torch.zeros(batch_size, 1).long().to(x.device)
         message = torch.cat([message + 1, tail], dim=1)
@@ -263,6 +262,60 @@ class ArithmeticSender2(nn.Module):
         return x + 1, zeros, zeros
 
 
+class RandomizedIdentitySender(nn.Module):
+    def __init__(self, n_values):
+        super().__init__()
+        self.n_values = n_values
+        self.multiplier = 1
+
+    def forward(self, x):
+        assert x.size(1) == 2, f'{x.size()}'
+        batch_size = x.size(0)
+        with torch.no_grad():
+            random_shift = torch.randint(self.multiplier, size=(batch_size, 1), device=x.device)
+            assert (random_shift < self.multiplier).all()
+            result = x * self.multiplier + random_shift
+                
+        zeros = torch.zeros_like(result, dtype=torch.float)
+        return result + 1, zeros, zeros
+
+class RandomizedHashSender(nn.Module):
+    def __init__(self, n_values, base):
+        super().__init__()
+        self.n_values = n_values
+        self.base = base
+
+        log = 0
+        k = 1
+
+        #print('NO RANDOMIZATION')
+        while k < n_values * n_values:
+            k *= base
+            log += 1
+
+        all_messages = list(itertools.product(*(range(base) for _ in range(log))))
+        n = n_values * n_values
+        selected = random.sample(all_messages, n)
+        selected = torch.tensor(selected).long()
+        selected.requires_grad_ = False
+
+        self.mapping = selected.view(n, log)
+
+    def forward(self, x):
+        assert x.size(1) == 2, f'{x.size()}'
+        batch_size = x.size(0)
+        result = []
+        with torch.no_grad():
+            for i in range(2):
+                random_shift = torch.randint(self.n_values, size=(batch_size,), device=x.device)
+                look_up_index = x[:, i] * self.n_values + random_shift
+                result.append(self.mapping[look_up_index, :])
+                
+        result = torch.cat(result, dim=1).to(x.device)
+
+        zeros = torch.zeros_like(result, dtype=torch.float)#(x.size(0), x.size(1), device=x.device)
+        return result + 1, zeros, zeros
+
 class HashSender(nn.Module):
     def __init__(self, n_values, base):
         super().__init__()
@@ -339,6 +392,45 @@ class MultiHashSender(nn.Module):
         return x + 1, zeros, zeros
 
 
+class UnfactorizedHashSender(nn.Module):
+    def __init__(self, n_attributes, n_values, base):
+        super().__init__()
+        self.max_values = n_values ** n_attributes
+        self.base = base
+        self.n_values = n_values
+
+        log = 0
+        k = 1
+
+        while k < self.max_values:
+            k *= base
+            log += 1
+
+        self.mappings = nn.ModuleList()
+
+        all_messages = list(itertools.product(*(range(base) for _ in range(log))))
+        selected = random.sample(all_messages, self.max_values)
+        selected = torch.tensor(selected).long()
+        selected.requires_grad_ = False
+
+        self.mapping = nn.Embedding(self.max_values, log)
+        self.mapping.weight[:, :] = selected
+
+        assert (self.mapping.weight < base).all()
+
+    def forward(self, x):
+        batch_size = x.size(0)
+
+        k = x[:, 0]
+        for i in range(1, x.size(1)):
+            k = k * self.n_values + x[:, i]
+        with torch.no_grad():
+            x = self.mapping(k).long()
+
+        zeros = torch.zeros(x.size(0), x.size(1), device=x.device)
+        return x + 1, zeros, zeros
+
+
 class MixerDiscrete(nn.Module):
     def __init__(self, n_attributes, n_values):
         super().__init__()
@@ -348,10 +440,17 @@ class MixerDiscrete(nn.Module):
         
     def forward(self, inp):
         batch_size = inp.size(0)
-
         added = torch.zeros_like(inp).long()
-        added[:, 1] = (inp[:, 0] + inp[:, 1]).fmod(self.n_values)
-        added[:, 0] = (self.n_values + inp[:, 0] - inp[:, 1]).fmod(self.n_values)
+
+        if inp.size(1) == 2:
+            added[:, 0] = (inp[:, 0] + inp[:, 1]).fmod(self.n_values)
+            added[:, 1] = (self.n_values + inp[:, 0] - inp[:, 1]).fmod(self.n_values)
+        elif inp.size(1) == 3:
+            added[:, 0] = (inp[:, 0] + inp[:, 1]).fmod(self.n_values)
+            added[:, 1] = (self.n_values + inp[:, 0] - inp[:, 1]).fmod(self.n_values)
+            added[:, 2] = (inp[:, 0] + inp[:, 2]).fmod(self.n_values)
+        else:
+            assert False
 
         return added
 

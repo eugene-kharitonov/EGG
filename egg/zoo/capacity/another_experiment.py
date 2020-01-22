@@ -24,6 +24,69 @@ from torch.utils.data import DataLoader
 import math
 
 
+class LanguageMixer(torch.nn.Module):
+    def __init__(self, positions, n_values):
+        super().__init__()
+        self.positions = positions
+        self.n_values = n_values
+        
+    def forward(self, x):
+        inp = x[0]
+        batch_size = inp.size(0)
+        mixed = inp.clone() - 1
+
+        for left, right in self.positions:
+            tmp_left = (inp[:, left] + inp[:, right]).fmod(self.n_values)
+            tmp_right = (self.n_values + inp[:, left] - inp[:, right]).fmod(self.n_values)
+
+            mixed[:, left], mixed[:, right] = tmp_left, tmp_right
+
+        return mixed + 1, x[1], x[2]
+
+class UnMixer(torch.nn.Module):
+    def __init__(self, positions, n_values):
+        super().__init__()
+        self.positions = positions
+        self.n_values = n_values
+        
+    def forward(self, x):
+        inp = x[0]
+        batch_size = inp.size(0)
+        mixed = inp.clone() - 1
+
+        for left, right in self.positions:
+            tmp_left = (inp[:, left] + inp[:, right]).fmod(self.n_values)
+            tmp_right = (self.n_values + inp[:, left] - inp[:, right]).fmod(self.n_values)
+
+            mixed[:, left], mixed[:, right] = tmp_left, tmp_right
+
+        return mixed + 1, x[1], x[2]
+
+class Permuter(torch.nn.Module):
+    def __init__(self, positions):
+        super().__init__()
+        self.positions = positions
+        
+    def forward(self, x):
+        inp = x[0]
+        batch_size = inp.size(0)
+        mixed = inp.clone()
+
+        for left, right in self.positions:
+            mixed[:, left], mixed[:, right] = inp[:, right], inp[:, left]
+
+        return mixed, x[1], x[2]
+
+class Printer(torch.nn.Module):
+    def __init__(self, name):
+        super().__init__()
+        self.name = name
+        
+    def forward(self, x):
+        print(self.name, x[0])
+        return x
+
+
 def get_params(params):
     print(params)
     parser = argparse.ArgumentParser()
@@ -38,7 +101,8 @@ def get_params(params):
     parser.add_argument('--receiver_emb', type=int, default=10,
                         help='Size of the embeddings of Receiver (default: 10)')
 
-    parser.add_argument('--mixers', type=int, default=1)
+    parser.add_argument('--mixer_type', type=str, choices=['in', 'out', 'none'])
+
     parser.add_argument('--n_a', type=int, default=2)
     parser.add_argument('--n_v', type=int, default=10)
 
@@ -56,26 +120,6 @@ def get_params(params):
 
     assert args.base >= 2
     return args
-
-
-class _DiffLoss(torch.nn.Module):
-    def __init__(self, n_attributes, n_values):
-        super().__init__()
-        self.n_attributes = n_attributes
-        self.n_values = n_values
-
-    def forward(self, sender_input, _message, _receiver_input, receiver_output, _labels):
-        batch_size = sender_input.size(0)
-        receiver_output = receiver_output.view(batch_size, self.n_attributes, self.n_values)
-
-        acc = (torch.sum((receiver_output.argmax(dim=-1) == sender_input).detach(), dim=1) == self.n_attributes).float().mean()
-        acc_or = (receiver_output.argmax(dim=-1) == sender_input).float().mean()
-
-        receiver_output = receiver_output.view(batch_size * self.n_attributes, self.n_values)
-        labels = sender_input.view(batch_size * self.n_attributes)
-        loss = F.cross_entropy(receiver_output, labels, reduction="none").view(batch_size, self.n_attributes).mean(dim=-1)
-
-        return loss, {'acc': acc, 'acc_or': acc_or}
 
 class DiffLoss(torch.nn.Module):
     def __init__(self, n_attributes, n_values, loss_type, predict=-1):
@@ -117,24 +161,6 @@ class DiffLoss(torch.nn.Module):
 
         return loss, {'acc': acc, 'acc_or': acc_or}
 
-
-class DiffLoss1(torch.nn.Module):
-    def __init__(self, n_attributes, n_values, loss_type):
-        super().__init__()
-        self.n_attributes = n_attributes
-        self.n_values = n_values
-
-    def forward(self, sender_input, _message, _receiver_input, receiver_output, _labels):
-        batch_size = sender_input.size(0)
-        receiver_output = receiver_output.view(batch_size, self.n_attributes, self.n_values)[:, 0, :]
-
-        acc = (receiver_output.argmax(dim=-1) == sender_input[:, 0]).detach().float().mean()
-
-        labels = sender_input[:, 0]
-        loss = F.cross_entropy(receiver_output, labels, reduction="mean")
-
-        return loss, {'acc': acc}
-
 def main(params):
     opts = get_params(params)
     print(opts)
@@ -147,74 +173,43 @@ def main(params):
     train_data = AttributeValueData(n_attributes=n_a, n_values=n_v, mul=1)
     train_loader = DataLoader(train_data, batch_size=opts.batch_size)
 
-    if opts.language == 'identity' or opts.language == 'scrambled-identity':
-        sender = IdentitySender(n_attributes=n_a, n_values=n_v)
-        opts.base = n_v
-    elif opts.language == 'arithmetic' or opts.language == 'scrambled-arithmetic':
-        sender = ArithmeticSender(n_a, n_v, base=opts.base)
-    elif opts.language == 'arithmetic2':
-        sender = ArithmeticSender2(n_a, n_v, base=opts.base)
-    elif opts.language == 'hash' or opts.language == 'scrambled-hash':
-        sender = HashSender(n_v, opts.base)
-    elif opts.language == 'multi-hash':
-        sender = MultiHashSender(n_a, n_v, opts.base)
-    elif opts.language == 'unfactorized-hash':
-        sender = UnfactorizedHashSender(n_a, n_v, opts.base)
-    elif opts.language == 'random-hash' or opts.language == 'scrambled-random-hash':
-        sender = RandomizedHashSender(n_v, opts.base)
-    elif opts.language in ['scrambled-random-identity', 'random-identity']:
-        sender = RandomizedIdentitySender(n_values=n_v)
+    sender = ArithmeticSender(n_a, n_v, base=opts.base)
+    if opts.mixer_type == 'none':
+        pass
+    elif opts.mixer_type == 'in':
+        mixer = LanguageMixer(positions=[(0, 1), (2, 3)], n_values=opts.base)
+        sender = torch.nn.Sequential(sender, mixer)
+    elif opts.mixer_type == 'out':
+        mixer = LanguageMixer(positions=[(0, 3), (1, 2)], n_values=opts.base)
+        sender = torch.nn.Sequential(sender, mixer)
     else:
         assert False
 
-    mixer = None
-    if opts.mixers > 0:
-        mixer = torch.nn.Sequential(
-            *(MixerDiscrete(n_attributes=n_a, n_values=n_v) for _ in range(opts.mixers))
-        )
-        sender = torch.nn.Sequential(mixer, sender)
 
-    if opts.scramble_positions == 1:
-        scrambler = PositionalScrambler()
-        sender = torch.nn.Sequential(sender, scrambler)
-
-    if 'scrambled-' in opts.language:
-        scrambler = VocabScrambler(opts.base)
-        sender = torch.nn.Sequential(sender, scrambler)
-
-    """for k, _ in train_data:
-        k = k.unsqueeze(0)
-        print(k, sender(k)[0])
-        print(k, sender(k)[0])
-        print(k, sender(k)[0])
-        print(k, sender(k)[0])
-        print(k, sender(k)[0])
-        print(k, sender(k)[0])
-        print(k, sender(k)[0])
-        exit(0)"""
+    #for k, _ in train_data:
+    #    k = k.unsqueeze(0)
+    #    print(k, sender(k)[0])
+    #exit(0)
 
     if opts.receiver_cell == 'transformer':
             receiver = Receiver(n_hidden=opts.receiver_emb, n_dim=n_a * n_v, inner_layers=opts.receiver_layers)
             receiver = core.TransformerReceiverDeterministic(receiver, 
                 opts.vocab_size, n_v + 2, opts.receiver_emb, num_heads=10, hidden_size=opts.receiver_hidden, num_layers=opts.cell_layers,
-                causal=True)#False)
+                causal=True)
     elif opts.receiver_cell == 'linear': 
         receiver = LinearReceiver(n_outputs=n_a * n_v, vocab_size=n_v + 1, max_length=3)#10)
     elif opts.receiver_cell == 'non-linear': 
-        receiver = NonLinearReceiver(n_outputs=n_a * n_v, vocab_size=n_v + 1, max_length=n_a + 1, n_hidden=opts.receiver_hidden)
+        receiver = NonLinearReceiver(n_outputs=n_a * n_v, vocab_size=n_v + 1, max_length=4, n_hidden=opts.receiver_hidden)
     else:
         receiver = Receiver(n_hidden=opts.receiver_hidden, n_dim=n_a * n_v, inner_layers=opts.receiver_layers)
-        #receiver = ReceiverRandomized(n_hidden=opts.receiver_hidden, n_a=n_a, n_v=n_v, inner_layers=opts.receiver_layers)
-        receiver = core.RnnReceiverDeterministic(#Reinforce( #Deterministic(
+        receiver = core.RnnReceiverDeterministic(
                 receiver, opts.vocab_size + 1,  # exclude eos = 0
                 opts.receiver_emb, opts.receiver_hidden, cell=opts.receiver_cell,
                 num_layers=opts.cell_layers)
 
     diff_loss = DiffLoss(n_a, n_v, opts.loss_type, opts.predict)
 
-
     game = core.SenderReceiverRnnReinforce(sender, receiver, diff_loss, receiver_entropy_coeff=0.05, sender_entropy_coeff=0.0)
-    #game = core.SenderReceiverRnnDeterministic(sender, receiver, diff_loss, receiver_entropy_coeff=0.05, sender_entropy_coeff=0.0)
        
     optimizer = core.build_optimizer(receiver.parameters())
     loss = game.loss
@@ -230,9 +225,27 @@ def main(params):
         grad_norm=1.0)
 
     trainer.train(n_epochs=opts.n_epochs)
-
     core.close()
 
+
+    """
+    if opts.mixer_type == 'in':
+        pre_mixer = torch.nn.Sequential(Permuter([ (1, 3) ]), Permuter([ (1, 2) ]) )
+        out_mixer = LanguageMixer(positions=[(0, 3), (1, 2)], n_values=opts.base)
+        post_mixer = torch.nn.Sequential(Permuter([(1, 3)]), Permuter([(2, 3)]))
+    
+        original_sender = ArithmeticSender(n_a, n_v, base=opts.base)
+        sender_permuted = torch.nn.Sequential(original_sender, Printer('after sender'), pre_mixer, Printer('after pre-mixer'), out_mixer, Printer('after out-mixer'), post_mixer, Printer('after post-mixer'))
+        sender_permuted.cuda()
+
+        for k, _ in train_data:
+            k = k.unsqueeze(0).cuda()
+            output = sender_permuted(k)
+            message = output[0]
+            prediction = receiver(message)[0]
+            bsz = prediction.size(0)
+            print(k, message, prediction.view(bsz, 2, -1).argmax(dim=-1))
+    """
 
 if __name__ == "__main__":
     import sys

@@ -48,8 +48,8 @@ def one_hotify(data, n_attributes, n_values):
     return r
 
 class AttributeValueData:
-    def __init__(self, n_attributes, n_values, one_hot=False):
-        self.data = [torch.LongTensor(k) for k in enumerate_attribute_value(n_attributes, n_values)]
+    def __init__(self, n_attributes, n_values, one_hot=False, mul=50):
+        self.data = [torch.LongTensor(k) for k in enumerate_attribute_value(n_attributes, n_values)] * mul
         if one_hot:
             self.data = one_hotify(self.data, n_attributes, n_values)
 
