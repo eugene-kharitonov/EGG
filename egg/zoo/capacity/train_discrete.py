@@ -185,13 +185,7 @@ def main(params):
     """for k, _ in train_data:
         k = k.unsqueeze(0)
         print(k, sender(k)[0])
-        print(k, sender(k)[0])
-        print(k, sender(k)[0])
-        print(k, sender(k)[0])
-        print(k, sender(k)[0])
-        print(k, sender(k)[0])
-        print(k, sender(k)[0])
-        exit(0)"""
+    exit(0)"""
 
     if opts.receiver_cell == 'transformer':
             receiver = Receiver(n_hidden=opts.receiver_emb, n_dim=n_a * n_v, inner_layers=opts.receiver_layers)
@@ -201,7 +195,7 @@ def main(params):
     elif opts.receiver_cell == 'linear': 
         receiver = LinearReceiver(n_outputs=n_a * n_v, vocab_size=n_v + 1, max_length=3)#10)
     elif opts.receiver_cell == 'non-linear': 
-        receiver = NonLinearReceiver(n_outputs=n_a * n_v, vocab_size=n_v + 1, max_length=n_a + 1, n_hidden=opts.receiver_hidden)
+        receiver = NonLinearReceiver(n_outputs=n_a * n_v, vocab_size=n_v + 1, max_length=2, n_hidden=opts.receiver_hidden)
     else:
         receiver = Receiver(n_hidden=opts.receiver_hidden, n_dim=n_a * n_v, inner_layers=opts.receiver_layers)
         #receiver = ReceiverRandomized(n_hidden=opts.receiver_hidden, n_a=n_a, n_v=n_v, inner_layers=opts.receiver_layers)

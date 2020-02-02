@@ -174,11 +174,11 @@ class IdentitySender(nn.Module):
         message = x
         #assert message.size(1) == 2
 
-        tail = torch.zeros(batch_size, 1).long().to(x.device)
-        message = torch.cat([message + 1, tail], dim=1)
+        #tail = torch.zeros(batch_size, 1).long().to(x.device)
+        #message = torch.cat([message + 1, tail], dim=1)
 
         zeros = torch.zeros(message.size(0), message.size(1), device=x.device)
-        return message, zeros, zeros
+        return message + 1, zeros, zeros
 
 
 class ArithmeticSender(nn.Module):
@@ -387,6 +387,35 @@ class MultiHashSender(nn.Module):
                 )
         x = torch.cat(result, dim=1)
         #x = x.view(batch_size, -1).long()
+
+        zeros = torch.zeros(x.size(0), x.size(1), device=x.device)
+        return x + 1, zeros, zeros
+
+
+class UnfactorizedIdentitySender(nn.Module):
+    def __init__(self, n_attributes, n_values):
+        super().__init__()
+        self.max_values = n_values ** n_attributes
+        self.n_values = n_values
+
+        all_messages = list(itertools.product(*(range(n_values) for _ in range(n_attributes))))
+        random.shuffle(all_messages)
+
+        selected = torch.tensor(all_messages).long()
+        selected.requires_grad_ = False
+
+        self.mapping = nn.Embedding(self.max_values, n_attributes)
+        self.mapping.weight[:, :] = selected
+
+    def forward(self, x):
+        batch_size = x.size(0)
+
+        k = x[:, 0]
+        for i in range(1, x.size(1)):
+            k = k * self.n_values + x[:, i]
+
+        with torch.no_grad():
+            x = self.mapping(k).long()
 
         zeros = torch.zeros(x.size(0), x.size(1), device=x.device)
         return x + 1, zeros, zeros

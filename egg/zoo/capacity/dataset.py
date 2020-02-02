@@ -30,12 +30,18 @@ class SphereData:
         return self.data_xy[k, :], self.data_ar[k, :]
 
 
-
-
-def enumerate_attribute_value(n_attributes, n_values):
+def enumerate_attribute_value(n_attributes, n_values, mode):
     iters = [range(n_values) for _ in range(n_attributes)]
 
-    return list(itertools.product(*iters))
+    data = list(itertools.product(*iters))
+
+    if mode is None:
+        return data
+    elif mode == 'train':
+        return [x for x in data if hash((x[0], x[1])) % 5!= 0]
+    elif mode == 'test':
+        return [x for x in data if hash((x[0], x[1])) % 5 == 0]
+    assert False
 
 
 def one_hotify(data, n_attributes, n_values):
@@ -48,14 +54,15 @@ def one_hotify(data, n_attributes, n_values):
     return r
 
 class AttributeValueData:
-    def __init__(self, n_attributes, n_values, one_hot=False, mul=50):
-        self.data = [torch.LongTensor(k) for k in enumerate_attribute_value(n_attributes, n_values)] * mul
+    def __init__(self, n_attributes, n_values, one_hot=False, mul=50, mode=None):
+        self.data = [torch.LongTensor(k) for k in enumerate_attribute_value(n_attributes, n_values, mode)] * mul
         if one_hot:
             self.data = one_hotify(self.data, n_attributes, n_values)
 
         for k in self.data:
             k[0] = (k[0] + 7).fmod(n_values)
             k[1] = (k[1] + 5).fmod(n_values)
+
     def __len__(self):
         return len(self.data)
 

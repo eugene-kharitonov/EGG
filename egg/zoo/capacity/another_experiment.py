@@ -170,8 +170,11 @@ def main(params):
     n_a, n_v = opts.n_a, opts.n_v 
     assert opts.vocab_size > n_v
 
-    train_data = AttributeValueData(n_attributes=n_a, n_values=n_v, mul=1)
+    train_data = AttributeValueData(n_attributes=n_a, n_values=n_v, mul=1, mode='train')
     train_loader = DataLoader(train_data, batch_size=opts.batch_size)
+
+    test_data = AttributeValueData(n_attributes=n_a, n_values=n_v, mul=1, mode='test')
+    test_loader = DataLoader(test_data, batch_size=opts.batch_size)
 
     sender = ArithmeticSender(n_a, n_v, base=opts.base)
     if opts.mixer_type == 'none':
@@ -221,6 +224,7 @@ def main(params):
     trainer = core.Trainer(
         game=game, optimizer=optimizer,
         train_data=train_loader,
+        validation_data=test_loader,
         callbacks=[core.ConsoleLogger(as_json=True, print_train_loss=True), metrics_evaluator, early_stopper],
         grad_norm=1.0)
 
