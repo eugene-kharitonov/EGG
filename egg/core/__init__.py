@@ -16,7 +16,7 @@ from .reinforce_wrappers import (ReinforceWrapper, SymbolGameReinforce,
                                  ReinforceDeterministicWrapper, RnnReceiverReinforce,
                                  RnnSenderReinforce, SenderReceiverRnnReinforce,
                                  RnnReceiverDeterministic, TransformerReceiverDeterministic,
-                                 TransformerSenderReinforce)
+                                 TransformerSenderReinforce, CommunicationRnnReinforce)
 from .util import find_lengths
 from .rnn import RnnEncoder
 from .interaction import LoggingStrategy, Interaction
@@ -55,5 +55,6 @@ __all__ = [
     'RnnEncoder',
     'find_lengths',
     'LoggingStrategy',
-    'Interaction'
+    'Interaction',
+    'CommunicationRnnReinforce'
 ]
