@@ -325,6 +325,73 @@ class RnnReceiverDeterministic(nn.Module):
         return agent_output, logits, entropy
 
 
+class CommunicationRnnReinforce(nn.Module):
+    def __init__(self, sender_entropy_coeff, receiver_entropy_coeff,
+                 length_cost=0.0, baseline_type=MeanBaseline,
+                 logging_strategy: LoggingStrategy = None):
+        """
+        :param sender_entropy_coeff: entropy regularization coeff for sender
+        :param receiver_entropy_coeff: entropy regularization coeff for receiver
+        :param length_cost: the penalty applied to Sender for each symbol produced
+        :param baseline_type: Callable, returns a baseline instance (eg a class specializing core.baselines.Baseline)
+        """
+        super().__init__()
+        self.sender_entropy_coeff = sender_entropy_coeff
+        self.receiver_entropy_coeff = receiver_entropy_coeff
+        self.length_cost = length_cost
+
+        self.baselines = defaultdict(baseline_type)
+        self.logging_strategy = LoggingStrategy() if logging_strategy is None else logging_strategy
+
+    def forward(self, sender, receiver, loss, sender_input, labels, receiver_input=None):
+        message, log_prob_s, entropy_s = sender(sender_input)
+        message_length = find_lengths(message)
+        receiver_output, log_prob_r, entropy_r = receiver(message, receiver_input, message_length)
+
+        loss, aux_info = loss(sender_input, message, receiver_input, receiver_output, labels)
+
+        # the entropy of the outputs of S before and including the eos symbol - as we don't care about what's after
+        effective_entropy_s = torch.zeros_like(entropy_r)
+
+        # the log prob of the choices made by S before and including the eos symbol - again, we don't
+        # care about the rest
+        effective_log_prob_s = torch.zeros_like(log_prob_r)
+
+        for i in range(message.size(1)):
+            not_eosed = (i < message_length).float()
+            effective_entropy_s += entropy_s[:, i] * not_eosed
+            effective_log_prob_s += log_prob_s[:, i] * not_eosed
+        effective_entropy_s = effective_entropy_s / message_length.float()
+
+        weighted_entropy = effective_entropy_s.mean() * self.sender_entropy_coeff + \
+                entropy_r.mean() * self.receiver_entropy_coeff
+
+        log_prob = effective_log_prob_s + log_prob_r
+
+        length_loss = message_length.float() * self.length_cost
+
+        policy_length_loss = ((length_loss - self.baselines['length'].predict(length_loss)) * effective_log_prob_s).mean()
+        policy_loss = ((loss.detach() - self.baselines['loss'].predict(loss.detach())) * log_prob).mean()
+
+        optimized_loss = policy_length_loss + policy_loss - weighted_entropy
+        # if the receiver is deterministic/differentiable, we apply the actual loss
+        optimized_loss += loss.mean()
+
+        if self.training:
+            self.baselines['loss'].update(loss)
+            self.baselines['length'].update(length_loss)
+
+        aux_info['sender_entropy'] = entropy_s.detach()
+        aux_info['receiver_entropy'] = entropy_r.detach()
+
+        interaction = self.logging_strategy.filtered_interaction(sender_input=sender_input,
+                                                                 labels=labels, receiver_input=receiver_input,
+                                                                 message=message.detach(), receiver_output=receiver_output.detach(),
+                                                                 message_length=message_length, aux=aux_info)
+
+        return optimized_loss, interaction
+
+
 class SenderReceiverRnnReinforce(nn.Module):
     """
     Implements Sender/Receiver game with training done via Reinforce. Both agents are supposed to
@@ -392,10 +459,7 @@ class SenderReceiverRnnReinforce(nn.Module):
         super(SenderReceiverRnnReinforce, self).__init__()
         self.sender = sender
         self.receiver = receiver
-        self.sender_entropy_coeff = sender_entropy_coeff
-        self.receiver_entropy_coeff = receiver_entropy_coeff
         self.loss = loss
-        self.length_cost = length_cost
 
         self.baselines = defaultdict(baseline_type)
         self.train_logging_strategy = LoggingStrategy() if train_logging_strategy is None else train_logging_strategy
