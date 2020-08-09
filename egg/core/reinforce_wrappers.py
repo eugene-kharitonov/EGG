@@ -344,6 +344,10 @@ class CommunicationRnnReinforce(nn.Module):
         """
         super().__init__()
 
+        self.sender_entropy_coeff = sender_entropy_coeff
+        self.receiver_entropy_coeff = receiver_entropy_coeff
+        self.length_cost = length_cost
+
         self.baselines = defaultdict(baseline_type)
         self.train_logging_strategy = LoggingStrategy() if train_logging_strategy is None else train_logging_strategy
         self.test_logging_strategy = LoggingStrategy() if test_logging_strategy is None else test_logging_strategy

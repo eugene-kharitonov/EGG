@@ -64,6 +64,7 @@ def _populate_cl_params(arg_parser: argparse.ArgumentParser) -> argparse.Argumen
                             help='Path for tensorboard log')
 
     arg_parser.add_argument('--distributed_port', default=18363, type=int, help='Port to use in distributed learning')
+    arg_parser.add_argument('--update_frequency', default=1, type=int, help='How often the accumulated gradients are applied in an optimizer step')
 
     return arg_parser
 
