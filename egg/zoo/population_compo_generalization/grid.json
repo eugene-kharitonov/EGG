@@ -15,8 +15,8 @@
     "lr":[0.001],
     "receiver_emb": [30],
     "sender_emb": [5],
-    "n_senders": [4],
-    "n_receivers": [4, 8],
+    "n_senders": [8],
+    "n_receivers": [8],
     "baseline": "builtin",
-    "update_freq": [4]
+    "update_freq": [8]
 }
