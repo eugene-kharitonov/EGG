@@ -15,11 +15,11 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 import egg.core as core
-from egg.core import EarlyStopperAccuracy
+from egg.core import EarlyStopperAccuracy, ReconstructionAccuracyCalculator, PosDisent, TopographicSimilarity
 from egg.zoo.multitask.features import OneHotLoader
-from egg.zoo.multitask.archs import Sender, Receiver, SenderTaskEmbedding
+from egg.zoo.multitask.archs import Sender, Receiver
 from egg.zoo.multitask.metrics import EvaluateAccuracy, EvaluateTopSim
-from egg.zoo.multitask.util import compute_binomial, get_output_file
+from egg.zoo.multitask.util import compute_binomial
 
 
 webhook_url = ''
@@ -117,24 +117,6 @@ class Loss(nn.Module):
         return loss, {'acc': acc}  #, 'soft_acc': soft_acc}
 
 
-def loss_wrapper(n_attributes, n_values):
-    def loss(sender_input, _message, _receiver_input, receiver_output, _labels):
-        batch_size = sender_input.size(0)
-        sender_input = sender_input.view(batch_size, n_attributes, n_values)
-
-        receiver_output = receiver_output.view(batch_size, n_attributes, n_values)
-
-        acc = (torch.sum((receiver_output.argmax(dim=-1) == sender_input.argmax(dim=-1)).detach(), dim=1) == n_attributes).float().mean()
-
-        receiver_output = receiver_output.view(batch_size * n_attributes, n_values)
-        labels = sender_input.argmax(dim=-1).view(batch_size * n_attributes)
-        loss = F.cross_entropy(receiver_output, labels, reduction="none").view(batch_size, n_attributes).mean(dim=-1)
-
-        return loss, {'acc': acc}
-
-    return loss
-
-
 @slack_sender(webhook_url=webhook_url, channel="knockknock", send_notification=True)
 def main(params):
     opts = get_params(params)
@@ -154,8 +136,6 @@ def main(params):
 
     train_it, val_it = dataloader.get_train_iterator(), dataloader.get_validation_iterator()
 
-    features = opts.n_attributes*opts.n_values
-
     num_tasks = 1  # starting from 1 counting the all attributes tasks
     if opts.multitask:
         for comb in range(1, opts.n_attributes):
@@ -165,7 +145,7 @@ def main(params):
                                opts.vocab_size, opts.sender_embedding, sender_embed_dim,
                                cell=opts.sender_cell, max_len=opts.max_len, num_layers=opts.sender_num_layers)
 
-    receivers = [core.RnnReceiverDeterministic(Receiver(n_features=features, n_hidden=opts.receiver_hidden),
+    receivers = [core.RnnReceiverDeterministic(Receiver(n_features=(opts.n_attributes*opts.n_values), n_hidden=opts.receiver_hidden),
                                                opts.vocab_size,
                                                opts.receiver_embedding,
                                                opts.receiver_hidden,
@@ -193,10 +173,11 @@ def main(params):
 
     callbacks = [core.ConsoleLogger(as_json=True, print_train_loss=True, output_file=output_file),
                  core.EarlyStopperAccuracy(threshold=opts.early_stopping_thr, validation=False),
-                 EvaluateAccuracy(games, val_it, 'test_set', 'acc',  opts.device, output_file, opts.task_embedding)]
+                 core.TopographicSimilarity(compute_topsim_train_set=True),
+                 core.PosDisent(print_train=True)]
 
     trainer = core.Trainer(games=game, optimizers=optimizer, train_data=train_it, validation_data=None, callbacks=callbacks)
-    trainer.train(n_epochs=opts.n_epochs, task_embedding=opts.task_embedding)
+    trainer.train(n_epochs=opts.n_epochs)
 
     core.close()
 

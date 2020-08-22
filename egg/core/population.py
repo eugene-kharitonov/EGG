@@ -65,3 +65,20 @@ class PopulationGame(nn.Module):
 
         return self.game(sender, receiver, loss, *args, **kwargs)
 
+
+class FullSweepAgentSequentialSampler(nn.Module):
+    def __init__(self, senders, receivers, losses):
+        super().__init__()
+
+        self.senders = nn.ModuleList(senders)
+        self.receivers = nn.ModuleList(receivers)
+        self.losses = list(losses)
+
+        self.idx = -1
+
+    def forward(self):
+        self.idx += 1
+        if self.idx >= len(self.senders):
+            self.idx = 0
+
+        return self.senders[self.idx], self.receivers[self.idx], self.losses[self.idx]

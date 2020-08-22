@@ -136,3 +136,21 @@ class CheckpointSaver(Callback):
                           model_state_dict=self.trainer.game.state_dict(),
                           optimizer_state_dict=self.trainer.optimizer.state_dict())
 
+
+class ReconstructionAccuracyCalculator(Callback):
+    def __init__(self, print_validation=False):
+        self.print_validation = print_validation
+
+    def compute_accuracy(self, logs: Interaction, name: str, epoch: int):
+        golden_truth = logs.sender_input.argmax(dim=-1)
+        accuracy= (golden_truth == sender_input).int().sum(dim=-1).sum(dim=-1) / acc.shape[0]
+
+        output = json.dumps(dict(accuracy=accuracy, mode=name, epoch=epoch))
+        print(output, flush=True)
+
+    def on_epoch_end(self, _loss, logs: Interaction, epoch: int):
+        self.compute_accuracy(logs, 'train', epoch)
+
+    def on_test_end(self, loss, logs, epoch):
+        if self.print_validation:
+            self.compute_accuracy(logs, 'test', epoch)

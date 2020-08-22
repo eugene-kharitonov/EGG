@@ -60,5 +60,6 @@ __all__ = [
     'CommunicationRnnReinforce'
     'MessageEntropy',
     'TopographicSimilarity',
-    'PosDisent'
+    'PosDisent',
+    'ReconstructionAccuracyCalculator'
 ]
