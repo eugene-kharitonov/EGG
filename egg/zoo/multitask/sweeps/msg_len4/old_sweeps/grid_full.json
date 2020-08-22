@@ -1,0 +1,17 @@
+{
+    "lr": [0.01, 0.001, 0.0001],
+    "batch_size": [256, 512, 1024],
+    "vocab_size": [30, 50, 100],
+    "n_values": [30],
+    "max_len": [5],
+    "n_attributes": [3],
+    "early_stopping_thr": [0.9999],
+    "n_epoch": [300],
+    "receiver_hidden": [256, 512],
+    "sender_hidden": [256, 512],
+    "receiver_cell": ["gru"],
+    "sender_cell": ["gru"],
+    "receiver_emb": [5, 30],
+    "sender_emb": [5, 30],
+    "random_seed": [21]
+}

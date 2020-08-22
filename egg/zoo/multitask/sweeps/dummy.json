@@ -1,0 +1,21 @@
+{
+    "batch_size": [1024],
+    "lr": [0.001],
+    "vocab_size": [100],
+    "receiver_hidden": [256],
+    "sender_hidden": [512],
+    "n_values": [30],
+    "max_len": [4],
+    "n_attributes": [3],
+    "early_stopping_thr": [0.9999],
+    "n_epoch": [2],
+    "receiver_cell": ["gru"],
+    "sender_cell": ["gru"],
+    "receiver_emb": [30],
+    "sender_emb": [30],
+    "multitask": [true],
+    "task_embedding": [true],
+    "task_embed_dim": [30],
+    "output": ["/private/home/rdessi/dummy_out"],
+    "random_seed": [111]
+}

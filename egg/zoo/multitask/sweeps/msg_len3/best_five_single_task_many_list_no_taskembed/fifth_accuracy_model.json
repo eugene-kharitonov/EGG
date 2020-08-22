@@ -1,0 +1,20 @@
+{
+    "batch_size": [256],
+    "lr": [0.001],
+    "vocab_size": [100],
+    "receiver_hidden": [256],
+    "sender_hidden": [256],
+    "n_values": [30],
+    "max_len": [4],
+    "n_attributes": [3],
+    "early_stopping_thr": [0.9999],
+    "n_epoch": [300],
+    "receiver_cell": ["gru"],
+    "sender_cell": ["gru"],
+    "receiver_emb": [30],
+    "sender_emb": [30],
+    "multitask": [true],
+    "same_task": [true],
+    "output": ["/private/home/rdessi/msglen3_single_task_many_list_no_taskembed/fifth_logs"],
+    "random_seed": [111, 222, 333, 444, 555, 666, 777, 888, 999, 1110]
+}

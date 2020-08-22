@@ -1,0 +1,20 @@
+{
+    "lr": [0.001],
+    "batch_size": [1024],
+    "vocab_size": [100],
+    "n_values": [30],
+    "max_len": [5],
+    "n_attributes": [3],
+    "early_stopping_thr": [0.9999],
+    "n_epoch": [300],
+    "receiver_hidden": [256],
+    "sender_hidden": [512],
+    "receiver_cell": ["gru"],
+    "sender_cell": ["gru"],
+    "receiver_emb": [30],
+    "sender_emb": [30],
+    "mtask": [1],
+    "evaluate_train_set_limit": [1000],
+    "output": ["/private/home/rdessi/output_many_list_same_task"],
+    "random_seed": [111, 222, 333, 444, 555, 666, 777, 888, 999, 1110]
+}
