@@ -15,10 +15,9 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 import egg.core as core
-from egg.core import EarlyStopperAccuracy, ReconstructionAccuracyCalculator, PosDisent, TopographicSimilarity
+from egg.core.population import FullSweepAgentSampler, PopulationGame
 from egg.zoo.multitask.features import OneHotLoader
 from egg.zoo.multitask.archs import Sender, Receiver
-from egg.zoo.multitask.metrics import EvaluateAccuracy, EvaluateTopSim
 from egg.zoo.multitask.util import compute_binomial
 
 
@@ -111,8 +110,7 @@ class Loss(nn.Module):
             s_inp[:, idx] = -1
 
         correct_samples = (receiver_output.argmax(dim=-1) == s_inp).detach()
-        acc = (torch.sum(correct_samples, dim=-1) == n_attr).float().mean()
-        #soft_acc = torch.div(torch.sum(correct_samples.float(), dim=-1), n_attr).mean()
+        acc = (torch.sum(correct_samples, dim=-1) == n_attr).float().mean(dim=-1, keepdim=True)
 
         return loss, {'acc': acc}  #, 'soft_acc': soft_acc}
 
@@ -141,9 +139,10 @@ def main(params):
         for comb in range(1, opts.n_attributes):
             num_tasks += compute_binomial(opts.n_attributes, comb)
 
+    sender = Sender(n_hidden_features=opts.sender_hidden, n_features=(opts.n_attributes*opts.n_values))
     sender = core.RnnSenderReinforce(sender,
-                               opts.vocab_size, opts.sender_embedding, sender_embed_dim,
-                               cell=opts.sender_cell, max_len=opts.max_len, num_layers=opts.sender_num_layers)
+                                     opts.vocab_size, opts.sender_embedding, opts.sender_hidden,
+                                     cell=opts.sender_cell, max_len=opts.max_len, num_layers=opts.sender_num_layers)
 
     receivers = [core.RnnReceiverDeterministic(Receiver(n_features=(opts.n_attributes*opts.n_values), n_hidden=opts.receiver_hidden),
                                                opts.vocab_size,
@@ -163,20 +162,24 @@ def main(params):
 
     losses = [Loss(n_attributes=opts.n_attributes, n_values=opts.n_values, skip_attributes=attributes) for attributes in skip_attributes_list]
 
+    baseline = {'no': core.baselines.NoBaseline,
+                'mean': core.baselines.MeanBaseline,
+                'builtin': core.baselines.BuiltInBaseline}[opts.baseline]
+
     game_mechanism = core.CommunicationRnnReinforce(sender_entropy_coeff=opts.sender_entropy_coeff,
                                                     receiver_entropy_coeff=0.0, length_cost=0.0, baseline_type=baseline)
 
-    assert len(senders) == len(receivers) and len(receivers) == len(losses)
-    agent_loss_sampler = FullSweepAgentSampler(senders, receivers, losses)
+    assert len(receivers) == len(losses)
+    agent_loss_sampler = FullSweepAgentSampler([sender], receivers, losses)
     game = PopulationGame(game_mechanism, agent_loss_sampler)
     optimizer = torch.optim.Adam(game.parameters(), lr=opts.lr)
 
-    callbacks = [core.ConsoleLogger(as_json=True, print_train_loss=True, output_file=output_file),
+    callbacks = [core.ConsoleLogger(as_json=True, print_train_loss=True),
                  core.EarlyStopperAccuracy(threshold=opts.early_stopping_thr, validation=False),
-                 core.TopographicSimilarity(compute_topsim_train_set=True),
-                 core.PosDisent(print_train=True)]
+                 core.TopographicSimilarity(),
+                 core.PosDisent(print_train=False)]
 
-    trainer = core.Trainer(games=game, optimizers=optimizer, train_data=train_it, validation_data=None, callbacks=callbacks)
+    trainer = core.Trainer(game=game, optimizer=optimizer, train_data=train_it, validation_data=val_it, callbacks=callbacks)
     trainer.train(n_epochs=opts.n_epochs)
 
     core.close()
