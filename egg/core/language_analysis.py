@@ -165,6 +165,7 @@ class PosDisent(Callback):
 
         self.print_train = print_train
         self.print_test = print_test
+        self.is_gumbel = is_gumbel
 
     @staticmethod
     def posdis(attributes, messages):
