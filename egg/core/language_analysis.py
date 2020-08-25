@@ -75,7 +75,6 @@ def mutual_info(xs, ys):
     return e_x + e_y - e_xy
 
 
-
 class MessageEntropy(Callback):
     def __init__(self, print_train: bool = True, is_gumbel: bool = False):
         super().__init__()
@@ -110,7 +109,8 @@ class TopographicSimilarity(Callback):
                  sender_input_distance_fn: Union[str, Callable] = 'cosine',
                  message_distance_fn: Union[str, Callable] = 'edit',
                  compute_topsim_train_set: bool = False,
-                 compute_topsim_test_set: bool = True):
+                 compute_topsim_test_set: bool = True,
+                 is_gumbel: bool = False):
 
         self.sender_input_distance_fn = self.distances.get(sender_input_distance_fn, None) \
             if isinstance(sender_input_distance_fn, str) else sender_input_distance_fn
@@ -122,23 +122,26 @@ class TopographicSimilarity(Callback):
         assert self.sender_input_distance_fn and self.message_distance_fn, f"Cannot recognize {sender_input_distance_fn} or {message_distance_fn} distances"
         assert compute_topsim_train_set or compute_topsim_test_set
 
-    def on_test_end(self, loss: float, logs: Interaction, epoch: int):
-        if self.compute_topsim_test_set:
-            self.compute_similarity(
-                sender_input=logs.sender_input, messages=logs.message, epoch=epoch)
+        self.is_gumbel = is_gumbel
 
     def on_epoch_end(self, loss: float, logs: Interaction, epoch: int):
         if self.compute_topsim_train_set:
             self.compute_similarity(
-                sender_input=logs.sender_input, messages=logs.message, epoch=epoch)
+                sender_input=logs.sender_input, messages=logs.message, mode='train', epoch=epoch)
 
-    def compute_similarity(self, sender_input: torch.Tensor, messages: torch.Tensor, epoch: int):
+    def on_test_end(self, loss: float, logs: Interaction, epoch: int):
+        if self.compute_topsim_test_set:
+            self.compute_similarity(
+                sender_input=logs.sender_input, messages=logs.message, mode='test', epoch=epoch)
+
+    def compute_similarity(self, sender_input: torch.Tensor, messages: torch.Tensor, mode: str, epoch: int):
         def compute_distance(_list, distance):
             return [distance(el1, el2)
                     for i, el1 in enumerate(_list[:-1])
                     for j, el2 in enumerate(_list[i+1:])
                     ]
 
+        messages = messages.argmax(dim=-1) if self.is_gumbel else messages
         messages = [msg.tolist() for msg in messages]
 
         input_dist = compute_distance(
@@ -147,7 +150,7 @@ class TopographicSimilarity(Callback):
         topsim = spearmanr(input_dist, message_dist,
                            nan_policy='raise').correlation
 
-        output_message = json.dumps(dict(topsim=topsim, epoch=epoch))
+        output_message = json.dumps(dict(topsim=topsim, mode=mode, epoch=epoch))
         print(output_message, flush=True)
 
 
@@ -156,10 +159,12 @@ class PosDisent(Callback):
     Positional disentanglement metric, introduced in "Compositionality and Generalization in Emergent Languages", 
     Chaabouni et al., ACL 2020.
     """
-    def __init__(self, print_train: bool = True, is_gumbel: bool = False):
+    def __init__(self, print_train: bool = False, print_test: bool = True, is_gumbel: bool = False):
         super().__init__()
+        assert print_train or print_test, 'At least on of "print_train" and "print_train" must be enabled'
+
         self.print_train = print_train
-        self.is_gumbel = is_gumbel
+        self.print_test = print_test
 
     @staticmethod
     def posdis(attributes, messages):
@@ -215,4 +220,5 @@ class PosDisent(Callback):
             self.print_message(logs, 'train', epoch)
 
     def on_test_end(self, loss, logs, epoch):
-        self.print_message(logs, 'test', epoch)
+        if self.print_test:
+            self.print_message(logs, 'test', epoch)
