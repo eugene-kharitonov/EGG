@@ -83,8 +83,8 @@ class FullSweepAgentSequentialSampler(nn.Module):
 
         # handling the case where we only have one sender
         if len(self.senders) > 1:
-            sender = self.senders[self.idx]
+            s, r, l = self.senders[self.idx], self.receivers[self.idx], self.losses[self.idx]
         else:
-            sender = self.senders[0]
+            s, r, l = self.senders[0], self.receivers[self.idx], self.losses[self.idx]
 
-        return self.sender, self.receivers[self.idx], self.losses[self.idx]
+        return s, r, l

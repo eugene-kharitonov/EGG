@@ -15,7 +15,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 import egg.core as core
-from egg.core.population import FullSweepAgentSampler, PopulationGame
+from egg.core.population import FullSweepAgentSequentialSampler, PopulationGame
 from egg.zoo.multitask.features import OneHotLoader
 from egg.zoo.multitask.archs import Sender, Receiver
 from egg.zoo.multitask.util import compute_binomial
@@ -170,14 +170,16 @@ def main(params):
                                                     receiver_entropy_coeff=0.0, length_cost=0.0, baseline_type=baseline)
 
     assert len(receivers) == len(losses)
-    agent_loss_sampler = FullSweepAgentSampler([sender], receivers, losses)
+    print(f'| There are {len(receivers)} recvs and {len(losses)} = {[l.skip_attributes for l in losses]} losses in the game\n')
+
+    agent_loss_sampler = FullSweepAgentSequentialSampler([sender], receivers, losses)
     game = PopulationGame(game_mechanism, agent_loss_sampler)
     optimizer = torch.optim.Adam(game.parameters(), lr=opts.lr)
 
     callbacks = [core.ConsoleLogger(as_json=True, print_train_loss=True),
                  core.EarlyStopperAccuracy(threshold=opts.early_stopping_thr, validation=False),
                  core.TopographicSimilarity(),
-                 core.PosDisent(print_train=False)]
+                 core.PosDisent()]
 
     trainer = core.Trainer(game=game, optimizer=optimizer, train_data=train_it, validation_data=val_it, callbacks=callbacks)
     trainer.train(n_epochs=opts.n_epochs)
