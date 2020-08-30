@@ -110,9 +110,9 @@ class Loss(nn.Module):
             s_inp[:, idx] = -1
 
         correct_samples = (receiver_output.argmax(dim=-1) == s_inp).detach()
-        acc = (torch.sum(correct_samples, dim=-1) == n_attr).float().mean(dim=-1, keepdim=True)
+        acc = (torch.sum(correct_samples, dim=-1) == n_attr).float()
 
-        return loss, {'acc': acc}  #, 'soft_acc': soft_acc}
+        return loss, {'acc': acc}
 
 
 @slack_sender(webhook_url=webhook_url, channel="knockknock", send_notification=True)
@@ -176,7 +176,7 @@ def main(params):
     game = PopulationGame(game_mechanism, agent_loss_sampler)
     optimizer = torch.optim.Adam(game.parameters(), lr=opts.lr)
 
-    callbacks = [core.ConsoleLogger(as_json=True, print_train_loss=True),
+    callbacks = [core.ConsoleLogger(print_train_loss=True),
                  core.EarlyStopperAccuracy(threshold=opts.early_stopping_thr, validation=False),
                  core.TopographicSimilarity(),
                  core.PosDisent()]
