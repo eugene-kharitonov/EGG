@@ -30,8 +30,7 @@ class Trainer:
             device: torch.device = None,
             callbacks: Optional[List[Callback]] = None,
             grad_norm: float = None,
-            aggregate_interaction_logs: bool = True,
-            update_freq: int = 1
+            aggregate_interaction_logs: bool = True
     ):
         """
         :param game: A nn.Module that implements forward(); it is expected that forward returns a tuple of (loss, d),
@@ -56,7 +55,6 @@ class Trainer:
         self.callbacks = callbacks if callbacks else []
         self.grad_norm = grad_norm
         self.aggregate_interaction_logs = aggregate_interaction_logs
-        self.update_freq = update_freq
 
         if common_opts.load_from_checkpoint is not None:
             print(f"# Initializing model, trainer, and optimizer from {common_opts.load_from_checkpoint}")
@@ -107,8 +105,7 @@ class Trainer:
 
             self.game = torch.nn.parallel.DistributedDataParallel(self.game,
                                                   device_ids=[device_id],
-                                                  output_device=device_id,
-                                                  find_unused_parameters=True)
+                                                  output_device=device_id)
 
 
         else:
@@ -146,22 +143,16 @@ class Trainer:
 
         self.game.train()
 
-        optimized_loss = None
-        self.optimizer.zero_grad()
-
-        for i, batch in enumerate(self.train_data):
+        for batch in self.train_data:
+            self.optimizer.zero_grad()
             batch = move_to(batch, self.device)
-            loss, interaction = self.game(*batch)
+            optimized_loss, interaction = self.game(*batch)
+            optimized_loss.backward()
 
-            optimized_loss = loss if optimized_loss is None else optimized_loss + loss
+            if self.grad_norm:
+                torch.nn.utils.clip_grad_norm_(self.game.parameters(), self.grad_norm)
 
-            if i % self.update_freq == 0:
-                optimized_loss.backward()
-
-                if self.grad_norm:
-                    torch.nn.utils.clip_grad_norm_(self.game.parameters(), self.grad_norm)
-                self.optimizer.step()
-                optimized_loss = torch.zeros_like(optimized_loss)
+            self.optimizer.step()
 
             n_batches += 1
             mean_loss += optimized_loss.detach()
