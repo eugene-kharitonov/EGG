@@ -9,16 +9,18 @@ import json
 import numpy as np
 import pathlib
 
-from knockknock import slack_sender
+#from knockknock import slack_sender
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
 
 import egg.core as core
 from egg.core.population import FullSweepAgentSequentialSampler, PopulationGame
-from egg.zoo.multitask.features import OneHotLoader
-from egg.zoo.multitask.archs import Sender, Receiver
-from egg.zoo.multitask.util import compute_binomial
+from egg.core.interaction import LoggingStrategy
+from egg.zoo.new_multitask.features import OneHotLoader
+from egg.zoo.new_multitask.archs import Sender, Receiver
+from egg.zoo.new_multitask.util import compute_binomial
+from egg.zoo.new_multitask.metrics import Evaluator
 
 
 webhook_url = ''
@@ -39,7 +41,7 @@ def get_params(params):
                         help='Number of batches per epoch (default: 5e5)')
 
     parser.add_argument('--shuffle_train_data', default=False, action='store_true')
-    parser.add_argument('--n_validation_samples', type=int, default=5000)
+    parser.add_argument('--n_validation_samples', type=int, default=2000)
     parser.add_argument('--val_batch_size', type=int, default=500)
 
     parser.add_argument('--sender_hidden', type=int, default=10,
@@ -115,7 +117,7 @@ class Loss(nn.Module):
         return loss, {'acc': acc}
 
 
-@slack_sender(webhook_url=webhook_url, channel="knockknock", send_notification=True)
+#slack_sender(webhook_url=webhook_url, channel="knockknock", send_notification=True)
 def main(params):
     opts = get_params(params)
     print(opts, flush=True)
@@ -166,22 +168,26 @@ def main(params):
                 'mean': core.baselines.MeanBaseline,
                 'builtin': core.baselines.BuiltInBaseline}[opts.baseline]
 
-    game_mechanism = core.CommunicationRnnReinforce(sender_entropy_coeff=opts.sender_entropy_coeff,
-                                                    receiver_entropy_coeff=0.0, length_cost=0.0, baseline_type=baseline)
-
     assert len(receivers) == len(losses)
     print(f'| There are {len(receivers)} recvs and {len(losses)} = {[l.skip_attributes for l in losses]} losses in the game\n')
 
     agent_loss_sampler = FullSweepAgentSequentialSampler([sender], receivers, losses)
+    empty_logger = LoggingStrategy.minimal()
+    game_mechanism = core.CommunicationRnnReinforce(sender_entropy_coeff=opts.sender_entropy_coeff,
+                                                    receiver_entropy_coeff=opts.receiver_entropy_coeff,
+                                                    length_cost=0.0,
+                                                    baseline_type=baseline,
+                                                    train_logging_strategy=empty_logger)
+
     game = PopulationGame(game_mechanism, agent_loss_sampler)
     optimizer = torch.optim.Adam(game.parameters(), lr=opts.lr)
 
+    n_tasks = 1 if opts.same_task else num_tasks
     callbacks = [core.ConsoleLogger(print_train_loss=True),
                  core.EarlyStopperAccuracy(threshold=opts.early_stopping_thr, validation=False),
-                 core.TopographicSimilarity(),
-                 core.PosDisent()]
+                 Evaluator(game=game, dataset=val_it, device=opts.device, n_tasks=n_tasks)]
 
-    trainer = core.Trainer(game=game, optimizer=optimizer, train_data=train_it, validation_data=val_it, callbacks=callbacks)
+    trainer = core.Trainer(game=game, optimizer=optimizer, train_data=train_it, callbacks=callbacks)
     trainer.train(n_epochs=opts.n_epochs)
 
     core.close()

@@ -9,7 +9,6 @@
     "n_attributes": [3],
     "early_stopping_thr": [0.9999],
     "n_epoch": [300],
-    "validation_freq": [300],
     "receiver_cell": ["gru"],
     "sender_cell": ["gru"],
     "receiver_emb": [5, 30],
